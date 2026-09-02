@@ -1,0 +1,218 @@
+@import "tailwindcss";
+
+/* Touch devices never fire hover, so anything we normally reveal on hover has
+ * to be permanently visible there. Used as `no-hover:opacity-100`. */
+@custom-variant no-hover (@media (hover: none));
+
+/* ------------------------------------------------------------------ theme
+ * Clean futuristic soft: a cool light canvas, white surfaces, near-black text,
+ * and colour used only as accent. Nothing warm, nothing textured.
+ */
+@theme {
+  --color-canvas: #f5f7fa;
+  --color-surface: #ffffff;
+  --color-line: #e5e7eb;
+  --color-line-soft: #eef1f6;
+
+  --color-text: #1f2937;
+  --color-text-2: #6b7280;
+  --color-text-3: #9ca3af;
+
+  /* Project accents, ordered by hue. Twelve, spaced so no two read alike;
+   * `slate` is deliberately desaturated, for a project that wants no colour. */
+  --color-blue: #3b82f6;
+  --color-sky: #0ea5e9;
+  --color-indigo: #6366f1;
+  --color-purple: #8b5cf6;
+  --color-fuchsia: #d946ef;
+  --color-pink: #ec4899;
+  --color-rose: #f43f5e;
+  --color-orange: #f97316;
+  --color-lime: #84cc16;
+  --color-green: #22c55e;
+  --color-teal: #14b8a6;
+  --color-slate: #64748b;
+
+  /* warnings only — a task outside work hours is not an error. Kept out of the
+   * project palette above: an amber mark must never read as someone's colour. */
+  --color-amber: #f59e0b;
+
+  /* The Schedule's availability ladder. Each rung is a clearly visible step
+   * down in brightness, so "can I work then?" is answered by lightness alone:
+   *   white      working hours — the usable part of the day
+   *   offhours   outside your work windows — recedes
+   *   blocked    meetings and the like — darker still, never blends into it
+   */
+  --color-offhours: #eef1f7;
+  --color-blocked: #d6dde8;
+
+  /* barely-there tints for accent surfaces */
+  --color-blue-soft: #eff4ff;
+  --color-purple-soft: #f5f2ff;
+  --color-teal-soft: #effcfa;
+
+  /* sticky notes — cool, light, never post-it yellow */
+  --color-note-blue: #eaf2ff;
+  --color-note-lavender: #f2eeff;
+  --color-note-mint: #e7fbf2;
+  --color-note-sky: #e8f7fb;
+  --color-note-grey: #f2f4f8;
+
+  --font-sans: var(--font-assistant), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: var(--font-rubik), var(--font-assistant), ui-sans-serif, system-ui, sans-serif;
+  /* the daily motto only — never UI chrome */
+  --font-hand: var(--font-hand-face), var(--font-assistant), ui-rounded, cursive;
+}
+
+/* ------------------------------------------------------------------ base */
+
+html {
+  color-scheme: light;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: var(--font-sans);
+  color: var(--color-text);
+  background-color: var(--color-canvas);
+  min-height: 100vh;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--color-blue) 18%, transparent);
+}
+
+/* Inputs that sit inline in the layout: no chrome, just a caret.
+ *
+ * In the `components` layer on purpose. Unlayered rules beat *every* layered
+ * one, so an unlayered `font: inherit` here would silently override the
+ * `text-[…]`/`font-…` utilities each composer passes in — and every inline
+ * field would render at body size instead of the size of the thing it becomes.
+ */
+@layer components {
+  .bare-input {
+    background: transparent;
+    border: 0;
+    outline: 0;
+    padding: 0;
+    margin: 0;
+    width: 100%;
+    color: var(--color-text);
+    caret-color: var(--color-blue);
+    resize: none;
+    font: inherit;
+  }
+  .bare-input::placeholder {
+    color: var(--color-text-3);
+    opacity: 1;
+  }
+}
+
+/* Gveret Levin ships a single weight, and no browser will synthesise a
+ * *lighter* one — `font-weight: 300` renders identically to 400. The only real
+ * way to thin it is to erode the glyph edges with a hairline stroke painted in
+ * the page colour (the stroke paints over the fill, eating inward by half its
+ * width).
+ *
+ * That ties this class to the canvas background, so it belongs to the motto
+ * alone — on any other surface the stroke colour would have to change with it.
+ */
+.hand-thin {
+  /* 0.5px removes ~13% of the ink. Past ~0.65px whole strokes start dropping
+   * out rather than thinning, which reads as broken instead of light. */
+  -webkit-text-stroke: 0.5px var(--color-canvas);
+}
+
+/* Times, ranges and other Latin/numeric runs stay LTR inside RTL text. */
+.ltr-run {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+/* ------------------------------------------------------------------ depth
+ * Three soft, cool-tinted elevations. No glass, no gradients.
+ */
+.shadow-flat {
+  box-shadow: 0 1px 2px rgb(16 24 40 / 0.04);
+}
+.shadow-card {
+  box-shadow:
+    0 1px 2px rgb(16 24 40 / 0.04),
+    0 8px 20px -12px rgb(16 24 40 / 0.14);
+}
+/* the Big card gets a whisper of blue in its shadow rather than more darkness */
+.shadow-feature {
+  box-shadow:
+    0 1px 2px rgb(16 24 40 / 0.04),
+    0 10px 26px -14px rgb(59 130 246 / 0.34);
+}
+.shadow-float {
+  box-shadow:
+    0 2px 4px rgb(16 24 40 / 0.04),
+    0 16px 32px -12px rgb(16 24 40 / 0.18);
+}
+.shadow-note {
+  box-shadow:
+    0 1px 2px rgb(16 24 40 / 0.03),
+    0 6px 16px -10px rgb(16 24 40 / 0.2);
+}
+.shadow-drag {
+  box-shadow:
+    0 2px 6px rgb(16 24 40 / 0.06),
+    0 20px 36px -12px rgb(16 24 40 / 0.24);
+}
+
+/* ------------------------------------------------------------------ blocked
+ * Time you don't get to use. It has to read as a different *layer* from a task
+ * — so: a denser fill, a whisper of hatching, no border and no elevation.
+ * Tasks are the active thing on the rail; this is the constraint around them.
+ */
+.blocked-fill {
+  background-color: var(--color-blocked);
+  background-image: repeating-linear-gradient(
+    -45deg,
+    rgb(31 41 55 / 0.05) 0 1px,
+    transparent 1px 7px
+  );
+}
+
+/* ------------------------------------------------------------------ motion */
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.fade-up {
+  animation: fade-up 180ms cubic-bezier(0.22, 0.68, 0.35, 1) both;
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.pop-in {
+  animation: pop-in 160ms cubic-bezier(0.22, 0.68, 0.35, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
