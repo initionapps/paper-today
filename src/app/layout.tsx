@@ -2,6 +2,8 @@ import type { Metadata, Viewport } from "next";
 import { Assistant, Gveret_Levin, Rubik } from "next/font/google";
 import "./globals.css";
 
+import { SyncBanner } from "@/components/sync-banner";
+
 /**
  * Inter and Manrope carry no Hebrew, so the UI runs on two families that do —
  * both with Latin and Hebrew drawn by the same hand, which is what keeps a
@@ -47,7 +49,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       dir="rtl"
       className={`${assistant.variable} ${rubik.variable} ${gveretLevin.variable}`}
     >
-      <body>{children}</body>
+      <body>
+        {children}
+        {/* Renders nothing until a write fails, so it costs the auth pages
+            nothing to have it here — and it is here, at the root, because an
+            unsaved change must be visible on whatever page it happened on. */}
+        <SyncBanner />
+      </body>
     </html>
   );
 }

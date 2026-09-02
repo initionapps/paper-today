@@ -14,6 +14,7 @@ import {
   useDayStore,
   workWindowsForDay,
 } from "@/lib/store/day-store";
+import { useAccountReady } from "@/lib/supabase/account";
 import { shiftDay, todayKey, weekdayIndex } from "@/lib/date";
 import {
   DAY_MIN,
@@ -34,13 +35,11 @@ import { Timeline, type RailRoutine } from "./timeline";
 
 export function ScheduleView() {
   const [day, setDay] = useState<DayKey>(todayKey);
-  const [hydrated, setHydrated] = useState(false);
+  // Supabase is the source of truth now; this is the account load, not a
+  // localStorage read. See lib/supabase/account.ts.
+  const hydrated = useAccountReady();
   const [nowMin, setNowMin] = useState(() => nowMinutes());
   const contentRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    Promise.resolve(useDayStore.persist.rehydrate()).then(() => setHydrated(true));
-  }, []);
 
   // the line only has to be minute-accurate
   useEffect(() => {

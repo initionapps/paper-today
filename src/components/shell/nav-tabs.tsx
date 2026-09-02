@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
+import { signOut } from "@/lib/auth-actions";
 import { copy } from "@/lib/copy";
 import { cn } from "@/lib/cn";
 
@@ -38,6 +39,21 @@ export function NavTabs() {
           </Link>
         );
       })}
+
+      {/* Pushed to the inline end, away from the tabs: signing out is not a
+          destination, and it should not sit in the rhythm of things you click
+          to move around. A plain form post, so it works without JS. */}
+      <form action={signOut} className="ms-auto">
+        <button
+          type="submit"
+          className={cn(
+            "cursor-pointer rounded-full px-3 py-1.5 text-[12.5px] text-text-3",
+            "transition-colors hover:bg-surface/70 hover:text-text-2",
+          )}
+        >
+          {copy.auth.signOut}
+        </button>
+      </form>
     </nav>
   );
 }

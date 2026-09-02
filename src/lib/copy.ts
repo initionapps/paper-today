@@ -14,6 +14,51 @@ export const copy = {
     projects: "פרויקטים",
   },
 
+  auth: {
+    signInTitle: "כניסה",
+    signInSubtitle: "יום אחד, עמוד אחד.",
+    signUpTitle: "יצירת חשבון",
+    signUpSubtitle: "החשבון שלך פרטי לגמרי.",
+    forgotTitle: "איפוס סיסמה",
+    forgotSubtitle: "נשלח קישור לאיפוס הסיסמה לכתובת שלך.",
+    resetTitle: "סיסמה חדשה",
+    resetSubtitle: "בחר סיסמה חדשה לחשבון.",
+
+    email: "אימייל",
+    password: "סיסמה",
+    newPassword: "סיסמה חדשה",
+
+    signInAction: "היכנס",
+    signUpAction: "צור חשבון",
+    forgotAction: "שלח קישור",
+    resetAction: "עדכן סיסמה",
+    signOut: "יציאה",
+
+    toSignUp: "אין לך חשבון? הרשמה",
+    toSignIn: "כבר יש לך חשבון? כניסה",
+    toForgot: "שכחת סיסמה?",
+    backToSignIn: "חזרה לכניסה",
+
+    working: "רגע…",
+
+    /** Deliberately identical whether or not the address exists. */
+    resetSent:
+      "אם קיים חשבון עם הכתובת הזו, נשלח אליה קישור לאיפוס הסיסמה. בדוק גם בתיקיית הספאם.",
+    confirmSent:
+      "שלחנו קישור אישור לכתובת שלך. פתח אותו כדי להפעיל את החשבון.",
+
+    /** Kept vague on purpose — never reveal whether the address is registered. */
+    invalidCredentials: "האימייל או הסיסמה אינם נכונים.",
+    emailNotConfirmed: "החשבון עדיין לא אושר. פתח את קישור האישור שנשלח אליך.",
+    passwordTooShort: (min: number) => `הסיסמה חייבת להכיל לפחות ${min} תווים.`,
+    emailRequired: "יש להזין כתובת אימייל.",
+    passwordRequired: "יש להזין סיסמה.",
+    linkExpired:
+      "הקישור פג תוקף או כבר נוצל. אפשר לבקש קישור חדש ולנסות שוב.",
+    genericError: "משהו השתבש. נסה שוב.",
+
+  },
+
   sections: {
     big: "גדולות",
     medium: "בינוניות",
@@ -116,7 +161,7 @@ export const copy = {
     title: "הגדרות",
     backupTitle: "גיבוי ושחזור",
     backupIntro:
-      "הנתונים נשמרים אוטומטית בדפדפן הזה בלבד. הורד עותק כדי שיהיה לך גיבוי גם מחוץ לדפדפן.",
+      "הנתונים נשמרים בחשבון שלך ומסונכרנים לכל מכשיר שבו תתחבר. הורד עותק כדי שיהיה לך גיבוי גם מחוץ לחשבון.",
     download: "הורד גיבוי",
     restore: "שחזר מגיבוי",
     chooseFile: "בחר קובץ גיבוי",
@@ -124,7 +169,14 @@ export const copy = {
       `${t} משימות · ${p} פרויקטים · ${n} פתקים`,
     currentData: "הנתונים כרגע",
     confirmTitle: "לשחזר מהגיבוי?",
-    confirmBody: "כל הנתונים הקיימים בדפדפן הזה יוחלפו בתוכן הגיבוי. אי אפשר לבטל את הפעולה.",
+    // Not "in this browser" any more — the data lives in the account, so a
+    // restore replaces it everywhere the account is signed in, not just here.
+    confirmBody: "כל הנתונים בחשבון שלך יימחקו ויוחלפו בתוכן הגיבוי. אי אפשר לבטל את הפעולה.",
+    restoring: "משחזר…",
+    restoreBlocked: "השחזור נעצר — יש רשומות שלא ניתן לשמור:",
+    // The restore runs as one transaction, so a failure changed nothing. Say so
+    // — the worry after a failed restore is "what state am I in now?".
+    restoreFailed: "השחזור נכשל. שום דבר לא שונה — הנתונים שלך נשארו כפי שהיו.",
     confirmFrom: (date: string) => `הגיבוי נוצר ב־${date}`,
     confirmRestore: "שחזר והחלף",
     cancel: "ביטול",
@@ -137,6 +189,62 @@ export const copy = {
     },
   },
 
+  /**
+   * The one-time import of a browser's local data into the account. Every string
+   * here has to be plain about what is about to happen to data the user cannot
+   * afford to lose, so it names counts and never says "just" or "simply".
+   */
+  importPanel: {
+    title: "נתונים מהדפדפן הזה",
+    intro:
+      "נמצאו נתונים ששמורים בדפדפן הזה מלפני המעבר לחשבון. אפשר לייבא אותם לחשבון שלך — פעם אחת.",
+    found: "מה נמצא בדפדפן",
+    motto: "כוונה",
+    noMotto: "(ריקה)",
+    projects: "פרויקטים",
+    tasks: "משימות",
+    routines: "שגרות",
+    routineLogs: "רשומות שגרה",
+    timeBlocks: "אירועים",
+    workWindows: "חלונות עבודה",
+    notes: "פתקים",
+    dayLogs: "סיכומי יום",
+
+    downloadFirst: "הורד גיבוי לפני הייבוא",
+    downloaded: "הגיבוי הורד.",
+    runImport: "ייבא לחשבון",
+    importing: "מייבא…",
+
+    blockedTitle: "הייבוא נעצר — יש רשומות שלא ניתן לשמור:",
+    blockedHint: "לא נכתב שום דבר. תקן את הרשומות האלה באפליקציה ונסה שוב.",
+
+    failedTitle: "הייבוא לא הושלם.",
+    failedHint:
+      "הנתונים בדפדפן לא שונו. אפשר ללחוץ שוב — הייבוא ממשיך מהנקודה שבה נעצר ולא ייצור כפילויות.",
+    retry: "נסה שוב",
+
+    reconcileTitle: "השוואה בין הדפדפן לחשבון",
+    reconcileTable: "טבלה",
+    reconcileLocal: "בדפדפן",
+    reconcileRemote: "בחשבון",
+    reconcileMissing: "חסר",
+
+    doneTitle: "הייבוא הושלם.",
+    doneBody:
+      "כל הרשומות אומתו אחת-אחת בחשבון. העותק הישן נשמר בדפדפן תחת מפתח גיבוי ואינו בשימוש עוד.",
+
+    archiveTitle: "העותק שלפני המעבר",
+    archiveBody: "עותק הנתונים מלפני הייבוא עדיין שמור בדפדפן הזה.",
+    downloadArchive: "הורד את העותק הישן",
+    discardArchive: "מחק את העותק הישן",
+    discardConfirm: "למחוק את העותק הישן מהדפדפן? אי אפשר לבטל.",
+    discardConfirmAction: "מחק לצמיתות",
+    cancel: "ביטול",
+    discarded: "העותק הישן נמחק.",
+
+    unreadable: "לא ניתן לקרוא את הנתונים בדפדפן:",
+  },
+
   header: {
     empty: "עדיין ריק",
     progress: (done: number, total: number) => `${done} מתוך ${total} הושלמו`,
@@ -147,7 +255,21 @@ export const copy = {
     closedAt: (time: string) => `היום נסגר ב-${time}`,
     wrapUp: "סיים את היום",
     reopen: "פתח מחדש את היום",
-    reset: "אפס נתוני דמו",
+  },
+
+  /**
+   * Shown when a write did not reach the server. It says what is true — the
+   * screen and the saved data disagree — rather than reassuring. The two cases
+   * are worded differently on purpose: a failed write might work on a retry, a
+   * cancelled one never will, because the account it belonged to is gone.
+   */
+  sync: {
+    failed: (n: number) =>
+      n === 1 ? "שינוי אחד לא נשמר" : `${n} שינויים לא נשמרו`,
+    cancelled: "שינויים שלא נשמרו בוטלו כי החשבון המחובר השתנה",
+    explain: "מה שמופיע כאן עדכני יותר ממה ששמור. טען מחדש כדי לראות את הנתונים השמורים.",
+    reload: "טען מחדש מהשרת",
+    dismiss: "התעלם",
   },
 
   wrapUp: {

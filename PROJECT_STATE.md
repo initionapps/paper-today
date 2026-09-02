@@ -10,10 +10,12 @@ why), [`README.md`](README.md) (feature list, how to run).
 ## 1. What this is
 
 A personal daily planner: **one day, one bounded column** — deliberately not an
-endless task list. Hebrew-first, RTL throughout, local-only.
+endless task list. Hebrew-first, RTL throughout, single-user accounts
+backed by Supabase.
 
 Stack: Next.js 16.3 (App Router, Turbopack) · React 19.2 · TypeScript · Tailwind
-v4 · zustand (persisted to `localStorage`) · dnd-kit · date-fns · lucide-react.
+v4 · zustand (in-memory) · Supabase (Postgres + RLS + auth) · dnd-kit ·
+date-fns · lucide-react.
 
 ```bash
 npm run dev
@@ -42,25 +44,65 @@ clean; keep them that way.
 | Routines: create/edit, recurrence, fixed time, daily override, archive | done |
 | **Recurring weekly work hours** (Schedule availability defaults) | remaining |
 | Supabase client wiring (`@supabase/ssr`, browser + server) | done |
-| **Supabase schema / auth / data migration** | not started |
+| Supabase schema + RLS (`0001`–`0006`) | applied |
+| Email/password auth (signup, sign-in, sign-out, reset) | done, verified end to end |
+| **Supabase persistence** (repository, write queue, account loader) | done, verified end to end |
+| **Data migration: localStorage → Supabase** | done, real data migrated and verified |
 
 Routes: `/today` · `/schedule` · `/tasks` · `/projects` · `/projects/[id]` ·
-`/settings`. `/` redirects to `/today`.
+`/settings`, all behind auth · `/login` · `/signup` · `/forgot-password` ·
+`/reset-password` · `/auth/callback` · `/auth/confirm`. `/` sends you to
+`/today` when signed in and `/login` when not.
 
-**No data is server-side yet.** The Supabase *client* is wired up — `@supabase/ssr`
-with a browser and a server helper in `src/lib/supabase/`, reading
-`NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` from
-`.env.local` — but nothing imports it, so every byte of state still lives in
-zustand and `localStorage`. There is no auth, and no secret/service-role key
-anywhere in the project.
+**Supabase is the source of truth.** Every row lives in Postgres, scoped to one
+`auth.users` id and fenced by RLS. Zustand is still the store the components
+read, but it is now an in-memory copy of the account, filled by
+`lib/supabase/account.ts` on load and kept in step by explicit writes. **The app
+no longer persists domain data to `localStorage` at all** — see §12 for the one
+key that remains, deliberately. No secret/service-role key exists anywhere in
+the project.
 
-The SQL in `supabase/migrations/0001_init.sql` is a design artifact that has
-**never been applied**; it exists so the client store is shaped like the
-eventual rows. It is edited in place for exactly that reason — see
-[`docs/SCHEMA.md`](docs/SCHEMA.md), which also covers the ownership model:
-every row belongs to one `auth.users` id, cross-user references are blocked by
-composite foreign keys, and RLS is enforced by the database rather than by any
-query the app writes.
+The per-browser limitation that used to live here is **gone**: data is per
+*user* now, so signing in as someone else on the same machine shows their
+account and nothing of yours.
+
+**Auth is verified end to end**, against the live project with two real
+accounts: signup → email confirmation → profile row → sign-in → sign-out →
+sign-in → forgot → reset → old password rejected. Cross-account isolation was
+tested by having one account attempt to read, update, delete and foreign-key
+its way into the other's rows by exact UUID; every attempt returned zero rows
+or a `23503` violation.
+
+**Persistence is verified end to end** against the live project: writes to all
+eight tables, FK-ordered writes (`addProject` then a task referencing it),
+updates, deletes, reload-from-server, sign-out clearing memory, a second
+account seeing zero rows, and — the one that shaped the design — six writes
+queued and the account switched mid-flight, after which the in-flight write
+landed under *its own* account, five were cancelled and reported, and **none
+leaked into the other account**.
+
+**The real migration is done and verified.** 206 tasks, 5 projects, 7 routines,
+5 routine logs, 2 time blocks, 17 work windows, 3 notes, 2 day logs and the
+motto were imported and then checked *by id*, not by count: every
+pre-migration row was re-derived through UUIDv5 and looked up in the account.
+All 41 project-linked tasks still resolve, no routine log is orphaned, and both
+archived-but-completed tasks kept their completion timestamps — the exact case
+`0004` was widened for.
+
+Six migrations are applied and frozen — `0001_init`, `0002_profile_trigger`,
+`0003_grants`, `0004_task_completion_constraint`, `0005_migration_marker`,
+`0006_restore_backup`. Every change from here is a new numbered migration.
+**`0003` exists because `0001` enabled RLS but never granted table
+privileges**: RLS decides which rows a role sees, `GRANT` decides whether it
+may touch the table at all, and without both a fully authenticated user gets
+`42501 permission denied`. **`0004` exists because `0001` encoded a rule the
+domain does not have** — it required `completed_at` to be present exactly when
+`status = 'done'`, which would have rejected a task that was completed and
+later archived, forcing a choice between discarding a real timestamp and not
+migrating the task. See [`docs/SCHEMA.md`](docs/SCHEMA.md), which also covers
+the ownership model: every row belongs to one `auth.users` id, cross-user
+references are blocked by composite foreign keys, and RLS is enforced by the
+database rather than by any query the app writes.
 
 ---
 
@@ -105,12 +147,18 @@ Full reasoning in [`docs/SCHEMA.md`](docs/SCHEMA.md). The essentials:
   separate `status` field; two columns describing one fact can disagree.
 - Work windows are merged **on read**, never on write. See §8.
 
-State lives in `src/lib/store/day-store.ts`, currently `STORE_VERSION = 6`,
-persisted under `localStorage["paper-today/day"]`.
+State lives in Supabase. `src/lib/store/day-store.ts` holds the in-memory copy
+of the signed-in account and no longer persists anything to the browser; each
+action updates state and queues its write through `lib/supabase/write-queue.ts`.
 
-**`PersistedSlice` + `persistedSlice()` are the single definition of "what
-survives a reload".** `partialize` and the backup export both read through it,
-so the two cannot drift. Add a field there when you add persisted state.
+`STORE_VERSION = 6` still matters, but only for *legacy* envelopes: backup files
+carry it, and `migratePersisted` reads both those and any browser that has not
+yet run the one-time import.
+
+**`PersistedSlice` + `persistedSlice()` are the single definition of "what this
+app's data is".** The backup export, the restore payload and the import all read
+through it, so they cannot drift. Add a field there when you add stored state —
+and add its `write()` call in the action that changes it.
 
 **Any field rename needs a version bump and a step in `migratePersisted`.** The
 user has real data in their own browser; a rename without a migration destroys
@@ -219,7 +267,8 @@ src/
     tasks/        AllTasksView, TaskRow, FilterBar
     projects/     ProjectsView, ProjectView, colour picker, notes
     schedule/     ScheduleView, Timeline, RailBlock, sidebar, work hours
-    settings/     BackupPanel
+    settings/     BackupPanel, ImportPanel (the one-time localStorage import)
+    sync-banner.tsx  the only place an unsaved write becomes visible
     ui/           Checkbox, Popover, Section
   lib/
     types.ts      domain types — the contract with the DB
@@ -228,9 +277,23 @@ src/
     schedule.ts   pure minute/pixel maths, intervals, lanes, capacity
     palette.ts    accent classes — plain data, no React, no import cycles
     backup.ts     export envelope + strict validation
-    supabase/     browser + server clients; env read literally, in one place
-    store/        the seam Supabase will slot into
-    mock/seed.ts  demo data; delete when Supabase lands
+    auth-actions.ts  "use server": sign in/up/out, reset, update password
+    supabase/
+      env.ts        literal process.env.NEXT_PUBLIC_* reads
+      client.ts     browser client        server.ts  server client (async cookies)
+      auth.ts       requireUser() / getOptionalUser()
+      proxy.ts      session refresh + optimistic redirect
+      ids.ts        newId() = real uuid; UUIDv5 derivation for legacy ids
+      mappers.ts    row ↔ domain: snake_case, order↔sort_order, undefined→null
+      repository.ts every read and write; no user_id filters — RLS does that
+      write-queue.ts session-bound FIFO; one request in flight, no debounce
+      account.ts    bind → clear → load, plus the auth-change listener
+      payload.ts    restore/import payload builder + pre-flight validator
+    migration/
+      local-import.ts  the one-time localStorage → Supabase import
+    store/        in-memory copy of the account; each action queues its write
+    mock/seed.ts  demo data — dev and tests ONLY, never written to an account
+  proxy.ts        session refresh + optimistic redirect (NOT middleware.ts)
 ```
 
 ---
@@ -290,6 +353,41 @@ Each of these was a real bug that took real debugging.
      React needs, in this harness — a real click does not have that problem,
      but a test relying on `.focus()` alone will look broken when the code is
      fine, or (more dangerously) look fine when it isn't.
+- **It is `proxy.ts`, not `middleware.ts`.** Next 16 deprecated the
+  `middleware` file convention and renamed it to `proxy` — same behaviour, but
+  the file *and the exported function* are both `proxy`. Every Supabase SSR
+  guide currently published still says `middleware.ts` with
+  `export async function middleware`, so copying one in verbatim gets you
+  deprecated code that Next may simply not run. Related: Next explicitly says a
+  proxy "should not be used as a full session management or authorization
+  solution" and must avoid database calls, because it runs on every request
+  including prefetches. That is why the real gate is `requireUser()` inside
+  each page, and why the proxy uses `getClaims()` — this project's JWTs are
+  ES256, so that verifies locally against cached JWKS instead of making a
+  network round-trip per navigation the way `getUser()` would.
+- **Never trust `getSession()` on the server.** It reads the cookie without
+  verifying it; the SDK's own docs say the user object it returns "must not be
+  trusted". Use `getClaims()` (verifies the signature) or `getUser()` (asks the
+  auth server).
+- **`signOut()` defaults to `scope: "global"` — it signs the user out
+  *everywhere*.** Not just this browser: every session that user holds, on
+  every device, including one they are in the middle of using. During auth
+  testing this silently killed a live password-recovery session in another
+  browser, and the reset then failed with `403 Session not found` several
+  minutes later — with nothing linking cause to effect. App logout is
+  `signOut({ scope: "local" })`. Reserve `global` for a deliberate "sign out
+  everywhere" button, so the reach is the user's choice rather than a default.
+  The same hazard applies to *test* flows: signing an account out in one
+  browser invalidates whatever that account is doing in another.
+- **Log the error from every Supabase auth call, even ones whose result the UI
+  must not reveal.** The auth actions deliberately return vague messages so
+  they cannot be used to probe which addresses are registered — and that
+  vagueness was extended, wrongly, to the server. Four separate failures in
+  this phase were invisible for exactly this reason: an email-send rate limit
+  (`429`), a failed code exchange, and a revoked recovery session all surfaced
+  as the same shrug on screen and *nothing at all* in the log. Keep the message
+  vague for the browser and precise in `logAuthFailure`; the two audiences have
+  opposite requirements.
 - **Never delete a row because an edit made it momentarily invalid.** Push the
   other edge instead.
 - **Don't sort a list the user is editing.** Re-sorting on keystroke moves the
@@ -309,6 +407,35 @@ Each of these was a real bug that took real debugging.
   derive in `useMemo`.
 - **Don't rewrite files containing Hebrew with PowerShell** (`Get-Content` /
   `Set-Content` mangles UTF-8). Use the editing tools.
+- **RLS does not stop a write landing in the wrong account.** Inserts omit
+  `user_id` and let it default to `auth.uid()`, so a write queued as one user
+  and sent after a switch is stamped with the *new* user's id — and the insert
+  policy **approves** it, because it is a legitimate row for whoever is signed
+  in now. RLS keeps other people out of your data; it has nothing to say about
+  your data being filed under someone else's name. Hence `write-queue.ts`:
+  every job carries the id it was queued for, and that is re-checked against
+  the live session immediately before the request goes out.
+- **Never derive writes by diffing the store.** It was the tempting design —
+  no per-action lines, one subscriber. It fails because hydration is
+  indistinguishable from mutation: `replaceAll` loading an account looks
+  exactly like the user editing every row at once, so the whole thing rests on
+  a suppression flag being right on every load, error path and account switch.
+  Explicit `write()` calls make `replaceAll` silent *by construction*.
+- **A debounce is not a free way to batch writes.** Any timer creates a window
+  in which a write is owed but unsent, which is the window an account switch
+  slips through. Bursty actions (a note textarea per keystroke, a drag per
+  frame) are collapsed instead by a `key` on the job plus reading the row at
+  *send* time: a second write for the same row skips if one is still queued,
+  and the queued one sends the newest state. No timer, no window.
+- **`ON CONFLICT DO NOTHING`, never `DO UPDATE`, in the import.** A retry must
+  not overwrite edits made in the app between two attempts. Verified: a task
+  renamed after a partial import kept its new title when the import re-ran.
+- **Reconcile by id, not by count.** Counts agreeing proves nothing when an
+  account already holds rows — a real run read *local 1 / remote 2 / missing 0*
+  and was correct. Derived ids are known in advance; check membership.
+- **`app/layout.tsx` had a stale `TestHook` import twice in this phase.** If a
+  temporary debug component is mounted, delete the file *and* both lines in the
+  layout, then `grep` for the name before claiming it is gone.
 
 ---
 
@@ -323,8 +450,15 @@ Each of these was a real bug that took real debugging.
 - **The task menu lists archived projects.** All Tasks filters to active ones;
   the menu does not. Flagged to the user, not yet fixed.
 - **Backup is manual only.** It relies on the user pressing *Download backup*.
-- **`Reset demo day`** at the foot of Today wipes real data without
-  confirmation. Fine while it's demo data; revisit before real daily use.
+- **`Reset demo day` is gone.** It refilled the store from `buildSeed()`, which
+  was harmless against one browser's localStorage and is not harmless against a
+  real account — every seeded row would be written in as though the user had
+  typed it. There is no safe version of that button, so it was removed rather
+  than rewired. `buildSeed` remains for development and tests; nothing in the
+  running app calls it, and **seed data must never reach a Supabase account**.
+- **A failed write is reported, not retried in the background.** The queue
+  retries once, then the banner says so and offers *reload from server*. That is
+  the deliberate limit of this design — there is no offline queue.
 - **Motto contrast is ~3.2:1** (`#848b98`) — deliberately soft, below WCAG AA.
   One token step darker is `text-text-2`.
 - Build prints `Failed to find font override values for font 'Gveret Levin'` —
@@ -345,7 +479,43 @@ Each of these was a real bug that took real debugging.
 - Report honestly: state what was verified, what wasn't, and what you changed
   beyond the literal request.
 
-## 11. Environment
+## 11. The pre-Supabase backup key — do not delete yet
+
+The migration did **not** delete the browser's old data. It renamed the key:
+
+```
+paper-today/day  →  paper-today/day.pre-supabase-backup
+```
+
+In the user's browser that archive is **70,933 bytes** and holds the exact v6
+envelope as it stood immediately before the import — 206 tasks, 5 projects, 7
+routines, 5 routine logs, 2 time blocks, 17 work windows, 3 notes, 2 day logs.
+The app never reads it. Nothing writes it.
+
+**Leave it there.** It is the only pre-migration copy in that browser, and it is
+the only thing that could reconstruct the original if the import turns out to
+have got something subtly wrong that the id-by-id check did not model. It costs
+70 KB of a multi-megabyte quota.
+
+Settings offers *הורד את העותק הישן* (download it) and *מחק את העותק הישן*
+(delete it, behind a two-step confirm). **The delete is the user's to press,
+deliberately, once they have lived with the migrated data for a while — not a
+tidy-up for anyone else to do.** Retiring it early is unrecoverable: the account
+holds the migrated rows, but the pre-migration snapshot exists nowhere else
+unless the user separately downloaded the JSON.
+
+`archiveLocalKey()` also refuses to overwrite an existing archive, so a second
+import can never replace the original snapshot with one that has since been
+through the app.
+
+Related: `profiles.local_migrated_at` (added in `0005`) records when the import
+finished. It is written **only after** reconciliation passes, and it is what
+stops the import prompt reappearing. Clearing it would make the panel offer the
+import again — harmless, because the import is idempotent, but confusing.
+
+---
+
+## 12. Environment
 
 Node 24.19 was installed mid-session via winget. If tooling reports `node` or
 `npm` as unknown, the shell has a stale PATH — open a new terminal, or prepend:

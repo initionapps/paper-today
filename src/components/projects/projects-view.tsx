@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 
@@ -8,6 +8,7 @@ import { EditableText } from "@/components/task/editable-text";
 import { InlineComposer } from "@/components/today/inline-composer";
 import { UndoToast } from "@/components/today/undo-toast";
 import { activeProjects, archivedProjects, projectTasks, useDayStore } from "@/lib/store/day-store";
+import { useAccountReady } from "@/lib/supabase/account";
 import { copy } from "@/lib/copy";
 import { cn } from "@/lib/cn";
 import type { Project, Task } from "@/lib/types";
@@ -16,12 +17,10 @@ import { ProjectDot } from "./project-color";
 import { ProjectMenu } from "./project-menu";
 
 export function ProjectsView() {
-  const [hydrated, setHydrated] = useState(false);
+  // Supabase is the source of truth now; this is the account load, not a
+  // localStorage read. See lib/supabase/account.ts.
+  const hydrated = useAccountReady();
   const [showArchived, setShowArchived] = useState(false);
-
-  useEffect(() => {
-    Promise.resolve(useDayStore.persist.rehydrate()).then(() => setHydrated(true));
-  }, []);
 
   const projects = useDayStore((s) => s.projects);
   const tasks = useDayStore((s) => s.tasks);

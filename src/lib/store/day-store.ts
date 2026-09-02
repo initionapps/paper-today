@@ -3,19 +3,30 @@
 /**
  * The single seam between the UI and storage.
  *
- * Today: everything lives here, persisted to localStorage.
- * Not started: the bodies of these actions become Supabase calls. Their
- *          signatures are already row-shaped (`id` + patch, fractional
- *          `order`), so no component changes.
+ * Supabase is the source of truth; this store is the in-memory copy the UI
+ * reads from. An action changes state immediately — the screen never waits for
+ * a network round trip — and then hands the write to the queue, which sends it
+ * in order and reports it if it fails.
+ *
+ * The write calls are one line each and sit directly beneath the `set` that
+ * caused them. That is deliberate: the alternative considered was a subscriber
+ * that diffed this store and derived the writes, which needs no per-action
+ * lines but makes hydration indistinguishable from a mutation — `replaceAll`
+ * loading an account would look exactly like the user editing every row at
+ * once, and the only thing standing between that and writing a whole dataset
+ * into the wrong account would be a suppression flag being right every time.
+ * Here `replaceAll` simply does not call `write`, and is silent by
+ * construction. The cost is remembering to add the line to a new action.
  */
 import { create } from "zustand";
-import { createJSONStorage, persist } from "zustand/middleware";
 
 import { copy } from "@/lib/copy";
 import { dateBucket, shortDate, todayKey, tomorrowOf } from "@/lib/date";
 import { PALETTE } from "@/lib/palette";
 import { mergeIntervals } from "@/lib/schedule";
-import { buildSeed } from "@/lib/mock/seed";
+import { newId } from "@/lib/supabase/ids";
+import * as repo from "@/lib/supabase/repository";
+import { write } from "@/lib/supabase/write-queue";
 import type {
   DateBucket,
   DayKey,
@@ -33,11 +44,23 @@ import type {
   WorkWindow,
 } from "@/lib/types";
 
-const uid = () => Math.random().toString(36).slice(2, 10);
+/**
+ * Ids are real uuids now, because the columns they land in are `uuid`.
+ *
+ * This used to be `Math.random().toString(36).slice(2, 10)` — eight characters
+ * like `qq5emksy`, which Postgres rejects outright. Rows already in a browser
+ * from before this change keep their short ids until they are imported, and
+ * the importer derives a stable uuid for each; see `supabase/ids.ts`.
+ */
+const uid = newId;
 
 const DEFAULT_MOTTO = "לעשות פחות, ולעשות את זה כמו שצריך.";
 
-/** Bumped whenever the persisted shape changes; see `migratePersisted`. */
+/**
+ * Still the version of the *local* shape, and still meaningful: backup files
+ * carry it, and a browser that has not been imported yet still holds a v6 blob
+ * under `paper-today/day`. `migratePersisted` below is what reads both.
+ */
 export const STORE_VERSION = 6;
 
 /**
@@ -213,468 +236,635 @@ interface DayState {
   clearUndo: () => void;
   runUndo: () => void;
 
-  resetToSeed: () => void;
+  /** Empty the in-memory store — sign-out, and before loading another account. */
+  clearLocal: () => void;
 }
 
-function seedState() {
-  const seed = buildSeed(todayKey());
-  return { ...seed, dayLogs: [] as DayLog[], motto: DEFAULT_MOTTO };
+/**
+ * An account before anything is loaded into it, and an account that genuinely
+ * has nothing in it, are the same picture: empty.
+ *
+ * This used to start from `buildSeed()`, so a fresh browser opened onto a
+ * furnished demo day. That cannot survive the move to a real account — the
+ * seed would be written into it as if the user had typed it, and a new user's
+ * first sight of their planner would be someone else's tasks. `buildSeed` is
+ * still there for development and tests; nothing in the running app calls it.
+ */
+function emptyState(): PersistedSlice {
+  return {
+    motto: DEFAULT_MOTTO,
+    projects: [],
+    tasks: [],
+    routines: [],
+    routineLogs: [],
+    timeBlocks: [],
+    workWindows: [],
+    notes: [],
+    dayLogs: [],
+  };
 }
 
-export const useDayStore = create<DayState>()(
-  persist(
-    (set, get) => {
-      /** Patch one task by id. */
-      const patchTask = (id: string, patch: Partial<Task>) =>
-        set((s) => ({ tasks: s.tasks.map((t) => (t.id === id ? { ...t, ...patch } : t)) }));
+export const useDayStore = create<DayState>()((set, get) => {
+  // ---------------------------------------------------------------- persistence
+  //
+  // One helper per entity. Each queues a write keyed by the row, and looks the
+  // row up **inside** the queued closure rather than capturing it here.
+  //
+  // That lookup-at-send-time is what lets a burst of edits collapse. Typing in
+  // a note queues one write on the first keystroke; the rest find that write
+  // still queued and skip, and when it finally runs it reads the note as it is
+  // by then — the last keystroke, not the first. See `write` in write-queue.ts.
+  //
+  // A row that has since been deleted simply isn't found, and the write becomes
+  // a no-op; the delete queued behind it is what reaches the database.
 
-      /** Register an undoable action, replacing any pending one. */
-      const remember = (label: string, undo: () => void) =>
-        set({ undo: { label, at: Date.now(), undo } });
+  const saveTask = (id: string) =>
+    write("save task", async () => {
+      const row = get().tasks.find((t) => t.id === id);
+      if (row) await repo.saveTask(row);
+    }, `task:${id}`);
 
-      /** Last rank in a (plannedDate, size) group, excluding one id. */
-      const tailOrder = (plannedDate: DayKey | null, size: TaskSize, exclude?: string) => {
-        const group = get()
-          .tasks.filter(
-            (t) =>
-              t.plannedDate === plannedDate &&
-              t.size === size &&
-              t.status !== "archived" &&
-              t.id !== exclude,
-          )
-          .sort((a, b) => a.order - b.order);
-        return orderBetween(group[group.length - 1]?.order, undefined);
-      };
+  const saveProject = (id: string) =>
+    write("save project", async () => {
+      const row = get().projects.find((p) => p.id === id);
+      if (row) await repo.saveProject(row);
+    }, `project:${id}`);
 
-      return {
-        ...seedState(),
-        undo: null,
+  const saveRoutine = (id: string) =>
+    write("save routine", async () => {
+      const row = get().routines.find((r) => r.id === id);
+      if (row) await repo.saveRoutine(row);
+    }, `routine:${id}`);
 
-        addTask: (plannedDate, size, title, projectId = null) => {
-          const trimmed = title.trim();
-          if (!trimmed) return;
-          set((s) => ({
-            tasks: [
-              ...s.tasks,
-              {
-                id: uid(),
-                title: trimmed,
-                detail: null,
-                projectId,
-                size,
-                status: "open",
-                plannedDate,
-                dueDate: null,
-                isImportant: false,
-                order: tailOrder(plannedDate, size),
-                scheduledStartMin: null,
-                scheduledEndMin: null,
-                completedAt: null,
-                createdAt: new Date().toISOString(),
-              },
-            ],
-          }));
-        },
+  const saveRoutineLog = (id: string) =>
+    write("save routine log", async () => {
+      const row = get().routineLogs.find((l) => l.id === id);
+      if (row) await repo.saveRoutineLog(row);
+    }, `routine-log:${id}`);
 
-        renameTask: (id, title) => {
-          const trimmed = title.trim();
-          if (!trimmed) return;
-          patchTask(id, { title: trimmed });
-        },
+  const saveTimeBlock = (id: string) =>
+    write("save time block", async () => {
+      const row = get().timeBlocks.find((b) => b.id === id);
+      if (row) await repo.saveTimeBlock(row);
+    }, `time-block:${id}`);
 
-        setTaskDetail: (id, detail) => patchTask(id, { detail: detail.trim() || null }),
+  const saveWorkWindow = (id: string) =>
+    write("save work window", async () => {
+      const row = get().workWindows.find((w) => w.id === id);
+      if (row) await repo.saveWorkWindow(row);
+    }, `work-window:${id}`);
 
-        toggleTask: (id) => {
-          const task = get().tasks.find((t) => t.id === id);
-          if (!task) return;
-          const done = task.status !== "done";
-          patchTask(id, {
-            status: done ? "done" : "open",
-            completedAt: done ? new Date().toISOString() : null,
-          });
-        },
+  const saveNote = (id: string) =>
+    write("save note", async () => {
+      const row = get().notes.find((n) => n.id === id);
+      if (row) await repo.saveNote(row);
+    }, `note:${id}`);
 
-        toggleImportant: (id) => {
-          const task = get().tasks.find((t) => t.id === id);
-          if (!task) return;
-          patchTask(id, { isImportant: !task.isImportant });
-        },
+  const saveDayLog = (day: DayKey) =>
+    write("save day log", async () => {
+      const row = get().dayLogs.find((l) => l.day === day);
+      if (row) await repo.saveDayLog(row);
+    }, `day-log:${day}`);
 
-        setTaskSize: (id, size) => {
-          const task = get().tasks.find((t) => t.id === id);
-          if (!task || task.size === size) return;
-          patchTask(id, { size, order: tailOrder(task.plannedDate, size, id) });
-        },
+  /** Patch one task by id, then persist it. */
+  const patchTask = (id: string, patch: Partial<Task>) => {
+    set((s) => ({ tasks: s.tasks.map((t) => (t.id === id ? { ...t, ...patch } : t)) }));
+    saveTask(id);
+  };
 
-        placeTask: (id, size, index) => {
-          const task = get().tasks.find((t) => t.id === id);
-          if (!task) return;
-          const group = get()
-            .tasks.filter(
-              (t) =>
-                t.plannedDate === task.plannedDate &&
-                t.size === size &&
-                t.status !== "archived" &&
-                t.id !== id,
-            )
-            .sort((a, b) => a.order - b.order);
-          const clamped = Math.max(0, Math.min(index, group.length));
-          const order = orderBetween(group[clamped - 1]?.order, group[clamped]?.order);
-          if (task.size === size && task.order === order) return;
-          patchTask(id, { size, order });
-        },
+  /** Register an undoable action, replacing any pending one. */
+  const remember = (label: string, undo: () => void) =>
+    set({ undo: { label, at: Date.now(), undo } });
 
-        setPlannedDate: (id, day) => {
-          const task = get().tasks.find((t) => t.id === id);
-          if (!task || task.plannedDate === day) return;
+  /** Last rank in a (plannedDate, size) group, excluding one id. */
+  const tailOrder = (plannedDate: DayKey | null, size: TaskSize, exclude?: string) => {
+    const group = get()
+      .tasks.filter(
+        (t) =>
+          t.plannedDate === plannedDate &&
+          t.size === size &&
+          t.status !== "archived" &&
+          t.id !== exclude,
+      )
+      .sort((a, b) => a.order - b.order);
+    return orderBetween(group[group.length - 1]?.order, undefined);
+  };
 
-          const before = {
-            plannedDate: task.plannedDate,
-            order: task.order,
-            scheduledStartMin: task.scheduledStartMin,
-            scheduledEndMin: task.scheduledEndMin,
-          };
+  return {
+    ...emptyState(),
+    undo: null,
 
-          patchTask(id, {
-            plannedDate: day,
-            order: tailOrder(day, task.size, id),
-            // a block belongs to a specific day; moving the day voids it
+    addTask: (plannedDate, size, title, projectId = null) => {
+      const trimmed = title.trim();
+      if (!trimmed) return;
+      const id = uid();
+      set((s) => ({
+        tasks: [
+          ...s.tasks,
+          {
+            id,
+            title: trimmed,
+            detail: null,
+            projectId,
+            size,
+            status: "open",
+            plannedDate,
+            dueDate: null,
+            isImportant: false,
+            order: tailOrder(plannedDate, size),
             scheduledStartMin: null,
             scheduledEndMin: null,
-          });
+            completedAt: null,
+            createdAt: new Date().toISOString(),
+          },
+        ],
+      }));
+      saveTask(id);
+    },
 
-          const today = todayKey();
-          const label =
-            day === null
-              ? copy.undo.plannedCleared(task.title)
-              : day === today
-                ? copy.undo.movedToToday(task.title)
-                : day === tomorrowOf(today)
-                  ? copy.undo.movedToTomorrow(task.title)
-                  : copy.undo.movedToDate(task.title, shortDate(day));
+    renameTask: (id, title) => {
+      const trimmed = title.trim();
+      if (!trimmed) return;
+      patchTask(id, { title: trimmed });
+    },
 
-          remember(label, () => patchTask(id, before));
-        },
+    setTaskDetail: (id, detail) => patchTask(id, { detail: detail.trim() || null }),
 
-        // "Tomorrow" always means tomorrow, not the day after whatever stale
-        // date the task happens to carry.
-        moveTaskToToday: (id) => get().setPlannedDate(id, todayKey()),
-        moveTaskToTomorrow: (id) => get().setPlannedDate(id, tomorrowOf(todayKey())),
+    toggleTask: (id) => {
+      const task = get().tasks.find((t) => t.id === id);
+      if (!task) return;
+      const done = task.status !== "done";
+      patchTask(id, {
+        status: done ? "done" : "open",
+        completedAt: done ? new Date().toISOString() : null,
+      });
+    },
 
-        setDueDate: (id, day) => patchTask(id, { dueDate: day }),
+    toggleImportant: (id) => {
+      const task = get().tasks.find((t) => t.id === id);
+      if (!task) return;
+      patchTask(id, { isImportant: !task.isImportant });
+    },
 
-        archiveTask: (id) => {
-          const task = get().tasks.find((t) => t.id === id);
-          if (!task) return;
-          const previous = task.status;
-          patchTask(id, { status: "archived" });
-          remember(copy.undo.archived(task.title), () => patchTask(id, { status: previous }));
-        },
+    setTaskSize: (id, size) => {
+      const task = get().tasks.find((t) => t.id === id);
+      if (!task || task.size === size) return;
+      patchTask(id, { size, order: tailOrder(task.plannedDate, size, id) });
+    },
 
-        deleteTask: (id) => {
-          const task = get().tasks.find((t) => t.id === id);
-          if (!task) return;
-          set((s) => ({ tasks: s.tasks.filter((t) => t.id !== id) }));
-          remember(copy.undo.deleted(task.title), () => set((s) => ({ tasks: [...s.tasks, task] })));
-        },
+    placeTask: (id, size, index) => {
+      const task = get().tasks.find((t) => t.id === id);
+      if (!task) return;
+      const group = get()
+        .tasks.filter(
+          (t) =>
+            t.plannedDate === task.plannedDate &&
+            t.size === size &&
+            t.status !== "archived" &&
+            t.id !== id,
+        )
+        .sort((a, b) => a.order - b.order);
+      const clamped = Math.max(0, Math.min(index, group.length));
+      const order = orderBetween(group[clamped - 1]?.order, group[clamped]?.order);
+      if (task.size === size && task.order === order) return;
+      patchTask(id, { size, order });
+    },
 
-        scheduleTask: (id, startMin, endMin = null) =>
-          patchTask(id, {
+    setPlannedDate: (id, day) => {
+      const task = get().tasks.find((t) => t.id === id);
+      if (!task || task.plannedDate === day) return;
+
+      const before = {
+        plannedDate: task.plannedDate,
+        order: task.order,
+        scheduledStartMin: task.scheduledStartMin,
+        scheduledEndMin: task.scheduledEndMin,
+      };
+
+      patchTask(id, {
+        plannedDate: day,
+        order: tailOrder(day, task.size, id),
+        // a block belongs to a specific day; moving the day voids it
+        scheduledStartMin: null,
+        scheduledEndMin: null,
+      });
+
+      const today = todayKey();
+      const label =
+        day === null
+          ? copy.undo.plannedCleared(task.title)
+          : day === today
+            ? copy.undo.movedToToday(task.title)
+            : day === tomorrowOf(today)
+              ? copy.undo.movedToTomorrow(task.title)
+              : copy.undo.movedToDate(task.title, shortDate(day));
+
+      remember(label, () => patchTask(id, before));
+    },
+
+    // "Tomorrow" always means tomorrow, not the day after whatever stale
+    // date the task happens to carry.
+    moveTaskToToday: (id) => get().setPlannedDate(id, todayKey()),
+    moveTaskToTomorrow: (id) => get().setPlannedDate(id, tomorrowOf(todayKey())),
+
+    setDueDate: (id, day) => patchTask(id, { dueDate: day }),
+
+    archiveTask: (id) => {
+      const task = get().tasks.find((t) => t.id === id);
+      if (!task) return;
+      const previous = task.status;
+      patchTask(id, { status: "archived" });
+      remember(copy.undo.archived(task.title), () => patchTask(id, { status: previous }));
+    },
+
+    deleteTask: (id) => {
+      const task = get().tasks.find((t) => t.id === id);
+      if (!task) return;
+      set((s) => ({ tasks: s.tasks.filter((t) => t.id !== id) }));
+      write("delete task", () => repo.deleteTask(id));
+      // Undo re-inserts the row it deleted, under the same id — so the
+      // upsert lands on the row that was there before rather than making a
+      // second one. Delete-then-recreate is the same round trip either way.
+      remember(copy.undo.deleted(task.title), () => {
+        set((s) => ({ tasks: [...s.tasks, task] }));
+        saveTask(id);
+      });
+    },
+
+    scheduleTask: (id, startMin, endMin = null) =>
+      patchTask(id, {
+        scheduledStartMin: startMin,
+        scheduledEndMin: startMin === null ? null : endMin,
+      }),
+
+    setTaskProject: (id, projectId) => patchTask(id, { projectId }),
+
+    addProject: (name) => {
+      const trimmed = name.trim();
+      const id = uid();
+      if (!trimmed) return id;
+      set((s) => ({
+        projects: [
+          ...s.projects,
+          {
+            id,
+            name: trimmed,
+            // cycle the palette so two new projects are never the same
+            // colour. Read from PALETTE rather than a copy of it, or the
+            // two lists drift the next time the palette changes.
+            color: PALETTE[s.projects.length % PALETTE.length],
+            description: "",
+            notes: "",
+            order: Math.max(0, ...s.projects.map((p) => p.order)) + 1,
+            archivedAt: null,
+          },
+        ],
+      }));
+      saveProject(id);
+      return id;
+    },
+
+    updateProject: (id, patch) => {
+      set((s) => ({
+        projects: s.projects.map((p) => (p.id === id ? { ...p, ...patch } : p)),
+      }));
+      saveProject(id);
+    },
+
+    archiveProject: (id) => {
+      const project = get().projects.find((p) => p.id === id);
+      if (!project || project.archivedAt) return;
+      set((s) => ({
+        projects: s.projects.map((p) =>
+          p.id === id ? { ...p, archivedAt: new Date().toISOString() } : p,
+        ),
+      }));
+      saveProject(id);
+      remember(copy.undo.projectArchived(project.name), () => get().restoreProject(id));
+    },
+
+    restoreProject: (id) => {
+      set((s) => ({
+        projects: s.projects.map((p) => (p.id === id ? { ...p, archivedAt: null } : p)),
+      }));
+      saveProject(id);
+    },
+
+    addRoutine: ({ title, weekdays, fixedStartMin = null, fixedEndMin = null }) => {
+      const id = uid();
+      const trimmed = title.trim();
+      if (!trimmed || weekdays.length === 0) return id;
+      set((s) => ({
+        routines: [
+          ...s.routines,
+          {
+            id,
+            title: trimmed,
+            weekdays: [...weekdays].sort((a, b) => a - b),
+            fixedStartMin,
+            fixedEndMin: fixedStartMin === null ? null : fixedEndMin,
+            order: Math.max(0, ...s.routines.map((r) => r.order)) + 1,
+            archivedAt: null,
+            createdAt: new Date().toISOString(),
+          },
+        ],
+      }));
+      saveRoutine(id);
+      return id;
+    },
+
+    updateRoutine: (id, patch) => {
+      set((s) => ({
+        routines: s.routines.map((r) => {
+          if (r.id !== id) return r;
+          const next = { ...r, ...patch };
+          // an end time without a start is meaningless
+          if (next.fixedStartMin === null) next.fixedEndMin = null;
+          if (patch.weekdays) next.weekdays = [...patch.weekdays].sort((a, b) => a - b);
+          return next;
+        }),
+      }));
+      saveRoutine(id);
+    },
+
+    archiveRoutine: (id) => {
+      const routine = get().routines.find((r) => r.id === id);
+      if (!routine || routine.archivedAt) return;
+      set((s) => ({
+        routines: s.routines.map((r) =>
+          // past logs are deliberately left alone: history is not undone
+          r.id === id ? { ...r, archivedAt: new Date().toISOString() } : r,
+        ),
+      }));
+      saveRoutine(id);
+      remember(copy.undo.routineArchived(routine.title), () => get().restoreRoutine(id));
+    },
+
+    restoreRoutine: (id) => {
+      set((s) => ({
+        routines: s.routines.map((r) => (r.id === id ? { ...r, archivedAt: null } : r)),
+      }));
+      saveRoutine(id);
+    },
+
+    toggleRoutine: (routineId, day) => {
+      const existing = get().routineLogs.find((l) => l.routineId === routineId && l.day === day);
+      if (existing) {
+        set((s) => ({
+          routineLogs: s.routineLogs.map((l) =>
+            l.id === existing.id
+              ? { ...l, completedAt: l.completedAt ? null : new Date().toISOString() }
+              : l,
+          ),
+        }));
+        saveRoutineLog(existing.id);
+        return;
+      }
+      const id = uid();
+      set((s) => ({
+        routineLogs: [
+          ...s.routineLogs,
+          {
+            id,
+            routineId,
+            day,
+            completedAt: new Date().toISOString(),
+            scheduledStartMin: null,
+            scheduledEndMin: null,
+          },
+        ],
+      }));
+      saveRoutineLog(id);
+    },
+
+    scheduleRoutine: (routineId, day, startMin, endMin = null) => {
+      const existing = get().routineLogs.find((l) => l.routineId === routineId && l.day === day);
+      if (existing) {
+        set((s) => ({
+          routineLogs: s.routineLogs.map((l) =>
+            l.id === existing.id
+              ? { ...l, scheduledStartMin: startMin, scheduledEndMin: startMin === null ? null : endMin }
+              : l,
+          ),
+        }));
+        saveRoutineLog(existing.id);
+        return;
+      }
+      const id = uid();
+      set((s) => ({
+        routineLogs: [
+          ...s.routineLogs,
+          {
+            id,
+            routineId,
+            day,
+            completedAt: null,
             scheduledStartMin: startMin,
             scheduledEndMin: startMin === null ? null : endMin,
-          }),
-
-        setTaskProject: (id, projectId) => patchTask(id, { projectId }),
-
-        addProject: (name) => {
-          const trimmed = name.trim();
-          const id = uid();
-          if (!trimmed) return id;
-          set((s) => ({
-            projects: [
-              ...s.projects,
-              {
-                id,
-                name: trimmed,
-                // cycle the palette so two new projects are never the same
-                // colour. Read from PALETTE rather than a copy of it, or the
-                // two lists drift the next time the palette changes.
-                color: PALETTE[s.projects.length % PALETTE.length],
-                description: "",
-                notes: "",
-                order: Math.max(0, ...s.projects.map((p) => p.order)) + 1,
-                archivedAt: null,
-              },
-            ],
-          }));
-          return id;
-        },
-
-        updateProject: (id, patch) =>
-          set((s) => ({
-            projects: s.projects.map((p) => (p.id === id ? { ...p, ...patch } : p)),
-          })),
-
-        archiveProject: (id) => {
-          const project = get().projects.find((p) => p.id === id);
-          if (!project || project.archivedAt) return;
-          set((s) => ({
-            projects: s.projects.map((p) =>
-              p.id === id ? { ...p, archivedAt: new Date().toISOString() } : p,
-            ),
-          }));
-          remember(copy.undo.projectArchived(project.name), () => get().restoreProject(id));
-        },
-
-        restoreProject: (id) =>
-          set((s) => ({
-            projects: s.projects.map((p) => (p.id === id ? { ...p, archivedAt: null } : p)),
-          })),
-
-        addRoutine: ({ title, weekdays, fixedStartMin = null, fixedEndMin = null }) => {
-          const id = uid();
-          const trimmed = title.trim();
-          if (!trimmed || weekdays.length === 0) return id;
-          set((s) => ({
-            routines: [
-              ...s.routines,
-              {
-                id,
-                title: trimmed,
-                weekdays: [...weekdays].sort((a, b) => a - b),
-                fixedStartMin,
-                fixedEndMin: fixedStartMin === null ? null : fixedEndMin,
-                order: Math.max(0, ...s.routines.map((r) => r.order)) + 1,
-                archivedAt: null,
-                createdAt: new Date().toISOString(),
-              },
-            ],
-          }));
-          return id;
-        },
-
-        updateRoutine: (id, patch) =>
-          set((s) => ({
-            routines: s.routines.map((r) => {
-              if (r.id !== id) return r;
-              const next = { ...r, ...patch };
-              // an end time without a start is meaningless
-              if (next.fixedStartMin === null) next.fixedEndMin = null;
-              if (patch.weekdays) next.weekdays = [...patch.weekdays].sort((a, b) => a - b);
-              return next;
-            }),
-          })),
-
-        archiveRoutine: (id) => {
-          const routine = get().routines.find((r) => r.id === id);
-          if (!routine || routine.archivedAt) return;
-          set((s) => ({
-            routines: s.routines.map((r) =>
-              // past logs are deliberately left alone: history is not undone
-              r.id === id ? { ...r, archivedAt: new Date().toISOString() } : r,
-            ),
-          }));
-          remember(copy.undo.routineArchived(routine.title), () => get().restoreRoutine(id));
-        },
-
-        restoreRoutine: (id) =>
-          set((s) => ({
-            routines: s.routines.map((r) => (r.id === id ? { ...r, archivedAt: null } : r)),
-          })),
-
-        toggleRoutine: (routineId, day) => {
-          const existing = get().routineLogs.find((l) => l.routineId === routineId && l.day === day);
-          if (existing) {
-            set((s) => ({
-              routineLogs: s.routineLogs.map((l) =>
-                l.id === existing.id
-                  ? { ...l, completedAt: l.completedAt ? null : new Date().toISOString() }
-                  : l,
-              ),
-            }));
-            return;
-          }
-          set((s) => ({
-            routineLogs: [
-              ...s.routineLogs,
-              {
-                id: uid(),
-                routineId,
-                day,
-                completedAt: new Date().toISOString(),
-                scheduledStartMin: null,
-                scheduledEndMin: null,
-              },
-            ],
-          }));
-        },
-
-        scheduleRoutine: (routineId, day, startMin, endMin = null) => {
-          const existing = get().routineLogs.find((l) => l.routineId === routineId && l.day === day);
-          if (existing) {
-            set((s) => ({
-              routineLogs: s.routineLogs.map((l) =>
-                l.id === existing.id
-                  ? { ...l, scheduledStartMin: startMin, scheduledEndMin: startMin === null ? null : endMin }
-                  : l,
-              ),
-            }));
-            return;
-          }
-          set((s) => ({
-            routineLogs: [
-              ...s.routineLogs,
-              {
-                id: uid(),
-                routineId,
-                day,
-                completedAt: null,
-                scheduledStartMin: startMin,
-                scheduledEndMin: startMin === null ? null : endMin,
-              },
-            ],
-          }));
-        },
-
-        addTimeBlock: (day, title, startMin, endMin) => {
-          const id = uid();
-          set((s) => ({
-            timeBlocks: [...s.timeBlocks, { id, day, title: title.trim(), startMin, endMin }],
-          }));
-          return id;
-        },
-
-        updateTimeBlock: (id, patch) =>
-          set((s) => ({
-            timeBlocks: s.timeBlocks.map((b) => (b.id === id ? { ...b, ...patch } : b)),
-          })),
-
-        deleteTimeBlock: (id) => {
-          const block = get().timeBlocks.find((b) => b.id === id);
-          if (!block) return;
-          set((s) => ({ timeBlocks: s.timeBlocks.filter((b) => b.id !== id) }));
-          remember(copy.undo.blockRemoved(block.title), () =>
-            set((s) => ({ timeBlocks: [...s.timeBlocks, block] })),
-          );
-        },
-
-        setWorkWindows: (day, windows) =>
-          set((s) => ({
-            workWindows: [
-              ...s.workWindows.filter((w) => w.day !== day),
-              ...windows
-                // a guard, not an editing rule: the editor never builds one
-                .filter((w) => w.endMin > w.startMin)
-                // keep ids so a row isn't remounted (and refocused) per keystroke
-                .map((w) => ({ id: w.id ?? uid(), day, startMin: w.startMin, endMin: w.endMin })),
-            ],
-          })),
-
-        mergeWorkWindows: (day) =>
-          set((s) => {
-            const mine = s.workWindows.filter((w) => w.day === day);
-            // mergeIntervals sorts as well as merges, so this also restores
-            // chronological order after editing left the rows out of sequence
-            const merged = mergeIntervals(mine);
-            const unchanged =
-              merged.length === mine.length &&
-              merged.every((m, i) => m.startMin === mine[i].startMin && m.endMin === mine[i].endMin);
-            if (unchanged) return s;
-            return {
-              workWindows: [
-                ...s.workWindows.filter((w) => w.day !== day),
-                ...merged.map((w) => ({ id: uid(), day, ...w })),
-              ],
-            };
-          }),
-
-        reorderRoutines: (ids) =>
-          set((s) => ({
-            routines: s.routines.map((r) => {
-              const index = ids.indexOf(r.id);
-              return index === -1 ? r : { ...r, order: index + 1 };
-            }),
-          })),
-
-        addNote: (day, x, y) => {
-          const palette: NoteColor[] = ["blue", "lavender", "mint", "sky", "grey"];
-          const id = uid();
-          set((s) => ({
-            notes: [
-              ...s.notes,
-              {
-                id,
-                day,
-                body: "",
-                color: palette[s.notes.length % palette.length],
-                x,
-                y,
-                // kept in the model, not expressed visually — see Note in types
-                rotation: 0,
-                z: Math.max(0, ...s.notes.map((note) => note.z)) + 1,
-                createdAt: new Date().toISOString(),
-              },
-            ],
-          }));
-          return id;
-        },
-
-        updateNote: (id, patch) =>
-          set((s) => ({ notes: s.notes.map((note) => (note.id === id ? { ...note, ...patch } : note)) })),
-
-        liftNote: (id) =>
-          set((s) => {
-            const top = Math.max(0, ...s.notes.map((note) => note.z));
-            return { notes: s.notes.map((note) => (note.id === id ? { ...note, z: top + 1 } : note)) };
-          }),
-
-        deleteNote: (id) => {
-          const note = get().notes.find((candidate) => candidate.id === id);
-          if (!note) return;
-          set((s) => ({ notes: s.notes.filter((candidate) => candidate.id !== id) }));
-          if (note.body.trim())
-            remember(copy.notes.removed, () => set((s) => ({ notes: [...s.notes, note] })));
-        },
-
-        setMotto: (motto) => set({ motto: motto.trim() }),
-
-        // a single set(): the store never observes a half-restored day, and
-        // the pending undo from before the restore is dropped with it
-        replaceAll: (slice) => set({ ...persistedSlice(slice), undo: null }),
-
-        wrapUpDay: (day) =>
-          set((s) => ({
-            dayLogs: [
-              ...s.dayLogs.filter((log) => log.day !== day),
-              { day, wrappedAt: new Date().toISOString(), reflection: null },
-            ],
-          })),
-
-        unwrapDay: (day) => set((s) => ({ dayLogs: s.dayLogs.filter((log) => log.day !== day) })),
-
-        clearUndo: () => set({ undo: null }),
-
-        runUndo: () => {
-          const entry = get().undo;
-          if (!entry) return;
-          entry.undo();
-          set({ undo: null });
-        },
-
-        resetToSeed: () => set({ ...seedState(), undo: null }),
-      };
+          },
+        ],
+      }));
+      saveRoutineLog(id);
     },
-    {
-      name: "paper-today/day",
-      version: STORE_VERSION,
-      storage: createJSONStorage(() => localStorage),
-      // Never write to storage during SSR, and never persist the undo closure.
-      skipHydration: true,
-      migrate: migratePersisted,
-      partialize: persistedSlice,
+
+    addTimeBlock: (day, title, startMin, endMin) => {
+      const id = uid();
+      set((s) => ({
+        timeBlocks: [...s.timeBlocks, { id, day, title: title.trim(), startMin, endMin }],
+      }));
+      saveTimeBlock(id);
+      return id;
     },
-  ),
-);
+
+    updateTimeBlock: (id, patch) => {
+      set((s) => ({
+        timeBlocks: s.timeBlocks.map((b) => (b.id === id ? { ...b, ...patch } : b)),
+      }));
+      saveTimeBlock(id);
+    },
+
+    deleteTimeBlock: (id) => {
+      const block = get().timeBlocks.find((b) => b.id === id);
+      if (!block) return;
+      set((s) => ({ timeBlocks: s.timeBlocks.filter((b) => b.id !== id) }));
+      write("delete time block", () => repo.deleteTimeBlock(id));
+      remember(copy.undo.blockRemoved(block.title), () => {
+        set((s) => ({ timeBlocks: [...s.timeBlocks, block] }));
+        saveTimeBlock(id);
+      });
+    },
+
+    /**
+     * Rewrites a whole day's windows, so persistence is a small diff: rows
+     * that survived are re-saved (coalesced per row while typing), rows
+     * that vanished are deleted.
+     */
+    setWorkWindows: (day, windows) => {
+      const before = get().workWindows.filter((w) => w.day === day);
+      set((s) => ({
+        workWindows: [
+          ...s.workWindows.filter((w) => w.day !== day),
+          ...windows
+            // a guard, not an editing rule: the editor never builds one
+            .filter((w) => w.endMin > w.startMin)
+            // keep ids so a row isn't remounted (and refocused) per keystroke
+            .map((w) => ({ id: w.id ?? uid(), day, startMin: w.startMin, endMin: w.endMin })),
+        ],
+      }));
+      const after = get().workWindows.filter((w) => w.day === day);
+      const survived = new Set(after.map((w) => w.id));
+      for (const w of before) {
+        if (!survived.has(w.id)) {
+          write("delete work window", () => repo.deleteWorkWindow(w.id), `work-window-delete:${w.id}`);
+        }
+      }
+      for (const w of after) saveWorkWindow(w.id);
+    },
+
+    mergeWorkWindows: (day) => {
+      const before = get().workWindows.filter((w) => w.day === day);
+      set((s) => {
+        const mine = s.workWindows.filter((w) => w.day === day);
+        // mergeIntervals sorts as well as merges, so this also restores
+        // chronological order after editing left the rows out of sequence
+        const merged = mergeIntervals(mine);
+        const unchanged =
+          merged.length === mine.length &&
+          merged.every((m, i) => m.startMin === mine[i].startMin && m.endMin === mine[i].endMin);
+        if (unchanged) return s;
+        return {
+          workWindows: [
+            ...s.workWindows.filter((w) => w.day !== day),
+            ...merged.map((w) => ({ id: uid(), day, ...w })),
+          ],
+        };
+      });
+      // Merging mints new ids for the merged rows, so every old row for the
+      // day goes and every new one arrives. Deletes first: the queue is
+      // ordered, and a day left briefly empty is better than one holding
+      // both spellings of the same hours.
+      const after = get().workWindows.filter((w) => w.day === day);
+      const survived = new Set(after.map((w) => w.id));
+      for (const w of before) {
+        if (!survived.has(w.id)) {
+          write("delete work window", () => repo.deleteWorkWindow(w.id), `work-window-delete:${w.id}`);
+        }
+      }
+      for (const w of after) saveWorkWindow(w.id);
+    },
+
+    reorderRoutines: (ids) => {
+      set((s) => ({
+        routines: s.routines.map((r) => {
+          const index = ids.indexOf(r.id);
+          return index === -1 ? r : { ...r, order: index + 1 };
+        }),
+      }));
+      for (const id of ids) saveRoutine(id);
+    },
+
+    addNote: (day, x, y) => {
+      const palette: NoteColor[] = ["blue", "lavender", "mint", "sky", "grey"];
+      const id = uid();
+      set((s) => ({
+        notes: [
+          ...s.notes,
+          {
+            id,
+            day,
+            body: "",
+            color: palette[s.notes.length % palette.length],
+            x,
+            y,
+            // kept in the model, not expressed visually — see Note in types
+            rotation: 0,
+            z: Math.max(0, ...s.notes.map((note) => note.z)) + 1,
+            createdAt: new Date().toISOString(),
+          },
+        ],
+      }));
+      saveNote(id);
+      return id;
+    },
+
+    // Fires per keystroke while typing and per frame while dragging. Both
+    // collapse to one queued write at a time — see `saveNote`'s key.
+    updateNote: (id, patch) => {
+      set((s) => ({ notes: s.notes.map((note) => (note.id === id ? { ...note, ...patch } : note)) }));
+      saveNote(id);
+    },
+
+    liftNote: (id) => {
+      set((s) => {
+        const top = Math.max(0, ...s.notes.map((note) => note.z));
+        return { notes: s.notes.map((note) => (note.id === id ? { ...note, z: top + 1 } : note)) };
+      });
+      saveNote(id);
+    },
+
+    deleteNote: (id) => {
+      const note = get().notes.find((candidate) => candidate.id === id);
+      if (!note) return;
+      set((s) => ({ notes: s.notes.filter((candidate) => candidate.id !== id) }));
+      write("delete note", () => repo.deleteNote(id), `note-delete:${id}`);
+      if (note.body.trim())
+        remember(copy.notes.removed, () => {
+          set((s) => ({ notes: [...s.notes, note] }));
+          saveNote(id);
+        });
+    },
+
+    setMotto: (motto) => {
+      const trimmed = motto.trim();
+      set({ motto: trimmed });
+      write("save motto", () => repo.saveMotto(get().motto), "motto");
+    },
+
+    /**
+     * Replaces the whole in-memory slice **without writing anything**.
+     *
+     * This is how an account is loaded, and how one is cleared on the way
+     * out. It must stay silent: a load that wrote back everything it just
+     * read would, after an account switch, write one account's data into
+     * another's. That is the entire reason the writes above are explicit
+     * per action rather than derived from watching this store.
+     */
+    replaceAll: (slice) => set({ ...persistedSlice(slice), undo: null }),
+
+    wrapUpDay: (day) => {
+      set((s) => ({
+        dayLogs: [
+          ...s.dayLogs.filter((log) => log.day !== day),
+          { day, wrappedAt: new Date().toISOString(), reflection: null },
+        ],
+      }));
+      saveDayLog(day);
+    },
+
+    unwrapDay: (day) => {
+      set((s) => ({ dayLogs: s.dayLogs.filter((log) => log.day !== day) }));
+      write("delete day log", () => repo.deleteDayLog(day), `day-log-delete:${day}`);
+    },
+
+    clearUndo: () => set({ undo: null }),
+
+    runUndo: () => {
+      const entry = get().undo;
+      if (!entry) return;
+      entry.undo();
+      set({ undo: null });
+    },
+
+    /**
+     * Empties the in-memory store. Used when signing out and before
+     * loading a different account, so one account's rows are never on
+     * screen — or reachable by a stray write — while another's are loading.
+     *
+     * Silent, for the same reason `replaceAll` is.
+     */
+    clearLocal: () => set({ ...emptyState(), undo: null }),
+  };
+});
 
 // ------------------------------------------------------------------ migration
 

@@ -38,18 +38,19 @@ Two rules that fall out of this and must never be broken:
 - **React 19.2** / **TypeScript**
 - **Tailwind v4** — CSS-first theming via `@theme` in `globals.css`
 - **dnd-kit** — reordering, cross-section size change, later Today → Schedule
-- **zustand** (+ `persist`) — client day-state
-- **Supabase** — Postgres + RLS + auth (schema defined now, wired later)
+- **zustand** — in-memory copy of the signed-in account (no `persist`)
+- **Supabase** — Postgres + RLS + auth; the source of truth for all data
 
 ### Why zustand now
 
 The Today page is a single dense interactive surface: reorder, resize, inline
 add, inline rename, sticky notes, wrap-up. Prop-drilling that through server
 components would fight the framework. So the app keeps the whole day in one
-client store persisted to `localStorage`, behind a narrow action API
-(`addTask`, `setSize`, `moveToDay`, …). Swapping the store's internals for
-Supabase calls is the deferred step; **components never touch storage
-directly**, so they don't change.
+client store behind a narrow action API (`addTask`, `setSize`, `moveToDay`, …).
+That store is now an in-memory copy of the account rather than a persisted one:
+an action updates it immediately and queues the write, so the screen never waits
+for the network. **Components never touch storage directly**, which is why the
+move to Supabase changed none of them.
 
 ---
 
@@ -108,26 +109,36 @@ src/
     palette.ts            project accent classes — plain data, no cycles
     cn.ts
     mock/seed.ts          realistic mock day, generated against today's date
-    store/day-store.ts    zustand store = the seam Supabase slots into
+    store/day-store.ts    in-memory account state; each action queues its write
+    supabase/             clients, repository, mappers, ids, write queue, loader
+    migration/            the one-time localStorage import
 ```
 
 ### The seam
 
 ```
-components ──▶ useDayStore() ──▶ [ done:        localStorage ]
-                               └▶ [ not started: Supabase client + realtime ]
+  read   components ◀── useDayStore() ◀── account.ts ◀── repository ◀── Supabase
+  write  action ──▶ set() ──▶ write-queue ──▶ repository ──▶ Supabase
+                    (instant)  (FIFO, session-bound, one in flight)
 ```
 
-Every mutation is already shaped like a row update (`{ id, patch }`), and every
-ordering operation already writes a fractional `order` — the same value the
-`sort_order double precision` column expects. Nothing in the UI assumes arrays.
+Every mutation was already shaped like a row update (`{ id, patch }`), and every
+ordering operation already wrote a fractional `order` — the same value the
+`sort_order double precision` column expects. That is why the swap touched no
+component: the seam held.
+
+The queue is **not** a sync engine. One request in flight, strict FIFO, one
+retry, and every job carries the user id it was queued for — re-checked against
+the live session immediately before it is sent, so a write can never land in an
+account other than the one that made it. There is no debounce, no offline
+buffer and no realtime.
 
 ### One definition of "persistent"
 
-`PersistedSlice` + `persistedSlice()` in the store are the single answer to
-"what survives a reload". `partialize` and the backup export both read through
-it, so a field added to the store can never end up saved but missing from
-backups — the two cannot drift.
+`PersistedSlice` + `persistedSlice()` in the store remain the single answer to
+"what is this app's data". The backup export, the restore payload and the
+one-time import all read through it, so a field added to the store cannot end up
+saved but missing from backups — the definitions cannot drift.
 
 Restore validates first and then applies in **one** `set()`, so the store never
 observes a half-restored day. Older backups are upgraded through the same
@@ -258,15 +269,18 @@ thing that moves work between days in bulk, and the user drives every choice.
 | Projects: colour, description, notes, archive, project page | **done** |
 | Schedule: hour rail, availability, blocked time, capacity | **done** |
 | Local backup & restore (Settings) | **done** |
-| Routine recurrence engine, recurring weekly work hours | **remaining** |
-| Supabase: schema apply, RLS, auth, store swap | **not started** |
+| Routine recurrence engine | **done** |
+| Recurring weekly work hours | **remaining** |
+| Supabase: schema, RLS, auth | **done, verified end to end** |
+| Supabase persistence + real-data migration | **done, verified end to end** |
 
 Schedule was built after All Tasks deliberately: without a backlog, any task not
 assigned to today effectively disappeared, which made planning impossible and
 made a calendar premature.
 
-Auth, routine recurrence and Supabase are still absent on purpose — building
-them earlier would have frozen UX decisions that are still moving.
+Auth and Supabase were deliberately built last: doing them earlier would have
+frozen UX decisions that were still moving, and would have meant migrating a
+data model that had not settled.
 
 ### Settled decisions
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -32,6 +32,7 @@ import {
   tasksForDay,
   useDayStore,
 } from "@/lib/store/day-store";
+import { useAccountReady } from "@/lib/supabase/account";
 import { todayKey, weekdayIndex } from "@/lib/date";
 import { copy } from "@/lib/copy";
 import { cn } from "@/lib/cn";
@@ -52,17 +53,13 @@ import { WrapUpDay } from "./wrap-up-day";
 
 export function TodayView() {
   const [day] = useState(todayKey);
-  const [hydrated, setHydrated] = useState(false);
+  // Supabase is the source of truth now; this is the account load, not a
+  // localStorage read. See lib/supabase/account.ts.
+  const hydrated = useAccountReady();
   const [activeId, setActiveId] = useState<string | null>(null);
   const [wrapOpen, setWrapOpen] = useState(false);
   const [newRoutineOpen, setNewRoutineOpen] = useState(false);
   const [showArchivedRoutines, setShowArchivedRoutines] = useState(false);
-
-  // persisted state is read after mount, so the server and the first client
-  // render agree on an empty day
-  useEffect(() => {
-    Promise.resolve(useDayStore.persist.rehydrate()).then(() => setHydrated(true));
-  }, []);
 
   const tasks = useDayStore((s) => s.tasks);
   const projects = useDayStore((s) => s.projects);
@@ -76,7 +73,6 @@ export function TodayView() {
   const reorderRoutines = useDayStore((s) => s.reorderRoutines);
   const addRoutine = useDayStore((s) => s.addRoutine);
   const unwrapDay = useDayStore((s) => s.unwrapDay);
-  const resetToSeed = useDayStore((s) => s.resetToSeed);
 
   const sections = useMemo(
     () => ({
@@ -364,13 +360,14 @@ export function TodayView() {
           )}
         </div>
 
-        <button
-          type="button"
-          onClick={resetToSeed}
-          className="mt-10 cursor-pointer text-[11.5px] text-text-3/60 transition-colors hover:text-text-3"
-        >
-          {copy.footer.reset}
-        </button>
+        {/*
+          The "reset to demo data" link used to live here. It refilled the store
+          from `buildSeed()`, which was harmless when the store was one
+          browser's localStorage and is not harmless now: every seeded row would
+          be written into the signed-in account as though the user had typed it.
+          There is no safe version of this button against a real account, so it
+          is gone rather than rewired.
+        */}
       </footer>
 
       <WrapUpDay

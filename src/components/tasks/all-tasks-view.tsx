@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
 import { InlineComposer } from "@/components/today/inline-composer";
 import { Section, type SectionAccent } from "@/components/ui/section";
 import { UndoToast } from "@/components/today/undo-toast";
 import { activeProjects, activeTasks, groupByBucket, useDayStore } from "@/lib/store/day-store";
+import { useAccountReady } from "@/lib/supabase/account";
 import { dateBucket, shiftDay, todayKey, tomorrowOf } from "@/lib/date";
 import { copy } from "@/lib/copy";
 import { cn } from "@/lib/cn";
@@ -41,13 +42,11 @@ function matches(task: Task, f: Filters, today: DayKey): boolean {
  */
 export function AllTasksView() {
   const [today] = useState(todayKey);
-  const [hydrated, setHydrated] = useState(false);
+  // Supabase is the source of truth now; this is the account load, not a
+  // localStorage read. See lib/supabase/account.ts.
+  const hydrated = useAccountReady();
   const [filters, setFilters] = useState<Filters>(NO_FILTERS);
   const [upcomingDate, setUpcomingDate] = useState<DayKey>(() => shiftDay(todayKey(), 2));
-
-  useEffect(() => {
-    Promise.resolve(useDayStore.persist.rehydrate()).then(() => setHydrated(true));
-  }, []);
 
   const tasks = useDayStore((s) => s.tasks);
   const projects = useDayStore((s) => s.projects);

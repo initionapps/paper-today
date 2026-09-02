@@ -11,6 +11,9 @@ import {
   type BackupSummary,
 } from "@/lib/backup";
 import { persistedSlice, useDayStore, type PersistedSlice } from "@/lib/store/day-store";
+import { useAccount, useAccountReady, syncAccount } from "@/lib/supabase/account";
+import { buildPayload, findInvalidRows } from "@/lib/supabase/payload";
+import { restoreBackup } from "@/lib/supabase/repository";
 import { longDate, toDayKey } from "@/lib/date";
 import { copy } from "@/lib/copy";
 import { cn } from "@/lib/cn";
@@ -26,17 +29,17 @@ interface Pending {
  * browser's localStorage.
  */
 export function BackupPanel() {
-  const [hydrated, setHydrated] = useState(false);
+  // Supabase is the source of truth now; this is the account load, not a
+  // localStorage read. See lib/supabase/account.ts.
+  const hydrated = useAccountReady();
   const [pending, setPending] = useState<Pending | null>(null);
   const [error, setError] = useState<BackupError | null>(null);
   const [restored, setRestored] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [problems, setProblems] = useState<string[]>([]);
+  const [restoreFailed, setRestoreFailed] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    Promise.resolve(useDayStore.persist.rehydrate()).then(() => setHydrated(true));
-  }, []);
-
-  const replaceAll = useDayStore((s) => s.replaceAll);
   const tasks = useDayStore((s) => s.tasks);
   const projects = useDayStore((s) => s.projects);
   const notes = useDayStore((s) => s.notes);
@@ -65,11 +68,51 @@ export function BackupPanel() {
     else setPending({ data: result.data, summary: result.summary });
   };
 
-  const confirmRestore = () => {
+  /**
+   * Restore still means *replace*: this account's data is deleted and the
+   * file's put in its place.
+   *
+   * It goes through `restore_backup` rather than a series of writes from here,
+   * because deleting nine tables and refilling them over separate requests
+   * leaves a failure halfway as an account that is neither the old data nor the
+   * new. The function is one statement, so it is one transaction — it either
+   * all lands or none of it does. See `0006_restore_backup.sql`.
+   */
+  const confirmRestore = async () => {
     if (!pending) return;
-    replaceAll(pending.data);
-    setPending(null);
-    setRestored(true);
+    setBusy(true);
+    setError(null);
+    setRestoreFailed(false);
+    try {
+      const userId = useAccount.getState().userId;
+      if (!userId) throw new Error("no signed-in account");
+
+      // Rows the database would refuse, caught here so the failure names the
+      // task rather than arriving as a constraint violation.
+      const problems = findInvalidRows(pending.data);
+      if (problems.length > 0) {
+        setProblems(problems);
+        setPending(null);
+        return;
+      }
+
+      await restoreBackup(await buildPayload(userId, pending.data));
+
+      // The store still holds what was on screen a moment ago; the truth is now
+      // whatever the transaction committed. Re-read it rather than assume.
+      await syncAccount(true);
+      setPending(null);
+      setRestored(true);
+    } catch (e) {
+      // Not a `BackupError` — those describe a file that could not be read, and
+      // this file read fine. The transaction rolled back, so the account still
+      // holds exactly what it held before.
+      console.error("[backup] restore failed", e);
+      setRestoreFailed(true);
+      setPending(null);
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -128,6 +171,13 @@ export function BackupPanel() {
           </p>
         )}
 
+        {restoreFailed && (
+          <p className="mt-4 flex items-start gap-2 rounded-xl bg-rose/8 px-3.5 py-3 text-[13px] text-rose">
+            <AlertTriangle size={15} strokeWidth={1.9} className="mt-px shrink-0" />
+            {copy.settings.restoreFailed}
+          </p>
+        )}
+
         {restored && (
           <p className="mt-4 flex items-center gap-2 rounded-xl bg-green/10 px-3.5 py-3 text-[13px] text-green">
             <Check size={15} strokeWidth={2.2} className="shrink-0" />
@@ -135,11 +185,33 @@ export function BackupPanel() {
           </p>
         )}
 
+        {problems.length > 0 && (
+          <div className="mt-4 rounded-xl bg-amber/10 px-3.5 py-3 text-[13px] text-text-2">
+            <p className="flex items-start gap-2 font-medium text-text">
+              <AlertTriangle size={15} strokeWidth={1.9} className="mt-px shrink-0 text-amber" />
+              {copy.settings.restoreBlocked}
+            </p>
+            <ul className="mt-2 list-disc space-y-1 ps-5 text-[12.5px]">
+              {problems.map((p) => (
+                <li key={p}>{p}</li>
+              ))}
+            </ul>
+            <button
+              type="button"
+              onClick={() => setProblems([])}
+              className="mt-3 cursor-pointer text-[12.5px] text-text-3 hover:text-text-2"
+            >
+              {copy.sync.dismiss}
+            </button>
+          </div>
+        )}
+
         {pending && (
           <ConfirmRestore
             summary={pending.summary}
+            busy={busy}
             onCancel={() => setPending(null)}
-            onConfirm={confirmRestore}
+            onConfirm={() => void confirmRestore()}
           />
         )}
       </div>
@@ -150,10 +222,12 @@ export function BackupPanel() {
 /** Destructive and irreversible, so it gets a real confirmation step. */
 function ConfirmRestore({
   summary,
+  busy,
   onCancel,
   onConfirm,
 }: {
   summary: BackupSummary;
+  busy: boolean;
   onCancel: () => void;
   onConfirm: () => void;
 }) {
@@ -195,9 +269,10 @@ function ConfirmRestore({
           <button
             type="button"
             onClick={onConfirm}
-            className="cursor-pointer rounded-full bg-rose px-5 py-2.5 text-[13.5px] font-semibold text-white transition-colors hover:bg-rose/90"
+            disabled={busy}
+            className="cursor-pointer rounded-full bg-rose px-5 py-2.5 text-[13.5px] font-semibold text-white transition-colors hover:bg-rose/90 disabled:opacity-60"
           >
-            {copy.settings.confirmRestore}
+            {busy ? copy.settings.restoring : copy.settings.confirmRestore}
           </button>
         </div>
       </div>

@@ -1,15 +1,33 @@
 # Database schema — decisions and rationale
 
-DDL: [`supabase/migrations/0001_init.sql`](../supabase/migrations/0001_init.sql).
-**Still not applied** — the Supabase *client* is wired up, but no data flows
-through it and this file has never been run against a database. It exists now
-because the client store is deliberately shaped like these rows, so the swap is
-mechanical.
+**Applied and live.** Real data flows through these tables — the app's entire
+state is here, and `localStorage` no longer holds any of it.
 
-Because it has never been applied, it is edited **in place** rather than
-corrected by follow-up migrations: a `0002` fixing a `0001` that never ran
-would describe a history that did not happen. The moment it *is* applied that
-stops being true, and everything after it becomes an additive migration.
+Six migrations, all applied and **frozen**. Every change from here is a new
+numbered migration; none of these are edited in place again.
+
+| | |
+| --- | --- |
+| [`0001_init.sql`](../supabase/migrations/0001_init.sql) | 9 tables, 2 enums, RLS + 36 policies, composite ownership FKs |
+| [`0002_profile_trigger.sql`](../supabase/migrations/0002_profile_trigger.sql) | creates a `profiles` row on signup (`security definer`) |
+| [`0003_grants.sql`](../supabase/migrations/0003_grants.sql) | table privileges for `authenticated` — see below |
+| [`0004_task_completion_constraint.sql`](../supabase/migrations/0004_task_completion_constraint.sql) | lets an archived task keep its completion time |
+| [`0005_migration_marker.sql`](../supabase/migrations/0005_migration_marker.sql) | `profiles.local_migrated_at` |
+| [`0006_restore_backup.sql`](../supabase/migrations/0006_restore_backup.sql) | transactional whole-account replace, `security invoker` |
+
+**`0003` exists because RLS and `GRANT` are independent.** `0001` enabled row
+level security but never granted table privileges: RLS decides *which rows* a
+role sees, `GRANT` decides whether it may touch the table at all. With only the
+first, a fully authenticated user gets `42501 permission denied` — which looks
+exactly like RLS working, and was briefly misread as such.
+
+**`0004` exists because `0001` encoded a rule the domain does not have.** The
+original constraint required `completed_at` to be present exactly when
+`status = 'done'`. But `archiveTask` deliberately leaves the timestamp alone, so
+a task completed and later archived carries both `archived` and a real
+completion time — a row the old constraint rejected. The fix widened the
+database to match the model rather than editing the data to fit the database:
+`open` must have no timestamp, `done` must have one, `archived` may have either.
 
 ```
 profiles ──┬── projects ──┐
@@ -192,8 +210,11 @@ are different concepts and the column names keep them apart.
 
 ## Client-side migration
 
-The store persists to `localStorage` under a version, and steps are applied in
-order so a browser sitting on v1 walks all the way up:
+Historical, but still load-bearing. The store no longer writes to
+`localStorage` — but **backup files carry a `dataVersion`**, and a browser that
+has not yet run the one-time import still holds a versioned envelope. Both are
+read through `migratePersisted`, so these steps still run, and a browser sitting
+on v1 walks all the way up before its rows are mapped to uuids and imported:
 
 - **v1 → v2** — `day → plannedDate`, `dueDate` appears, and a stored
   `durationMin` is folded into `scheduledEndMin` (`start + duration`).
