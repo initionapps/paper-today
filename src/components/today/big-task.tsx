@@ -1,5 +1,7 @@
 "use client";
 
+import { memo } from "react";
+
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 
@@ -19,7 +21,7 @@ import { DragHandle } from "./drag-handle";
  * The loudest thing on the page — carried by type size, padding and a blue-lit
  * shadow, never by a dark fill. It should feel important, not heavy.
  */
-export function BigTask({ task, project, today }: { task: Task; project?: Project; today: DayKey }) {
+function BigTaskImpl({ task, project, today }: { task: Task; project?: Project; today: DayKey }) {
   const toggleTask = useDayStore((s) => s.toggleTask);
   const renameTask = useDayStore((s) => s.renameTask);
   const setTaskDetail = useDayStore((s) => s.setTaskDetail);
@@ -124,3 +126,13 @@ export function BigTask({ task, project, today }: { task: Task; project?: Projec
     </article>
   );
 }
+
+/**
+ * Today re-renders whenever any task in the store changes; without this, every card on the page re-rendered with it.
+ *
+ * Safe because every prop is stable by construction: `task` keeps its object
+ * identity unless that row actually changed, `project` comes from a memoised
+ * map, and the rest are primitives. The store actions these components read are
+ * stable references, so they never cause a render on their own.
+ */
+export const BigTask = memo(BigTaskImpl);

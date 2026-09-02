@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, memo } from "react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { Archive, MoreHorizontal, Pencil, RotateCcw } from "lucide-react";
@@ -21,7 +21,7 @@ import { RoutineEditor } from "./routine-editor";
  * a per-day fact rather than completing anything. The round checkbox and the
  * repeat glyph say so before any label does.
  */
-export function RoutineLine({
+function RoutineLineImpl({
   routine,
   day,
   done,
@@ -169,3 +169,13 @@ export function RoutineLine({
     </div>
   );
 }
+
+/**
+ * A routine does not change when a task does, but it re-rendered anyway.
+ *
+ * Safe because every prop is stable by construction: `task` keeps its object
+ * identity unless that row actually changed, `project` comes from a memoised
+ * map, and the rest are primitives. The store actions these components read are
+ * stable references, so they never cause a render on their own.
+ */
+export const RoutineLine = memo(RoutineLineImpl);

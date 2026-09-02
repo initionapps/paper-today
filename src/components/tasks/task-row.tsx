@@ -1,5 +1,7 @@
 "use client";
 
+import { memo } from "react";
+
 import { EditableText } from "@/components/task/editable-text";
 import { ImportantHeart } from "@/components/task/important-heart";
 import { DueBadge, ProjectTag, ScheduledChip } from "@/components/task/task-meta";
@@ -28,7 +30,7 @@ const TITLE: Record<TaskSize, string> = {
  * One line in All Tasks. Not a table row: no columns, no grid, and the same
  * inline-rename and menu as the Today page so nothing has to be learned twice.
  */
-export function TaskRow({
+function TaskRowImpl({
   task,
   project,
   today,
@@ -93,3 +95,13 @@ export function TaskRow({
     </div>
   );
 }
+
+/**
+ * One row of All Tasks — the longest list in the app. Unmemoised, a couple of hundred rows all re-rendered on every toggle, rename or filter change, because the view re-renders whenever the `tasks` array identity changes.
+ *
+ * Safe because every prop is stable by construction: `task` keeps its object
+ * identity unless that row actually changed, `project` comes from a memoised
+ * map, and the rest are primitives. The store actions these components read are
+ * stable references, so they never cause a render on their own.
+ */
+export const TaskRow = memo(TaskRowImpl);

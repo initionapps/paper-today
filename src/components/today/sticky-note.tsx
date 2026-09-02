@@ -1,6 +1,6 @@
 "use client";
 
-import { useLayoutEffect, useRef } from "react";
+import { useLayoutEffect, useRef, memo } from "react";
 import { useDraggable } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
 import { X } from "lucide-react";
@@ -26,7 +26,7 @@ const PAPER: Record<NoteColor, string> = {
  * can put anywhere — free position and a soft tint carry that, without tilting
  * it like a scrap of paper.
  */
-export function StickyNote({ note, autoFocus }: { note: Note; autoFocus?: boolean }) {
+function StickyNoteImpl({ note, autoFocus }: { note: Note; autoFocus?: boolean }) {
   const updateNote = useDayStore((s) => s.updateNote);
   const deleteNote = useDayStore((s) => s.deleteNote);
   const liftNote = useDayStore((s) => s.liftNote);
@@ -100,3 +100,13 @@ export function StickyNote({ note, autoFocus }: { note: Note; autoFocus?: boolea
     </div>
   );
 }
+
+/**
+ * Typing in one note re-rendered every other note on the day.
+ *
+ * Safe because every prop is stable by construction: `task` keeps its object
+ * identity unless that row actually changed, `project` comes from a memoised
+ * map, and the rest are primitives. The store actions these components read are
+ * stable references, so they never cause a render on their own.
+ */
+export const StickyNote = memo(StickyNoteImpl);

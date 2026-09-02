@@ -1,5 +1,7 @@
 "use client";
 
+import { memo } from "react";
+
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 
@@ -16,7 +18,7 @@ import type { DayKey, Project, Task } from "@/lib/types";
 import { DragHandle } from "./drag-handle";
 
 /** Two to a row, a hairline border, almost no elevation. Never competes with Big. */
-export function MediumTask({
+function MediumTaskImpl({
   task,
   project,
   today,
@@ -99,3 +101,13 @@ export function MediumTask({
     </article>
   );
 }
+
+/**
+ * See BigTask.
+ *
+ * Safe because every prop is stable by construction: `task` keeps its object
+ * identity unless that row actually changed, `project` comes from a memoised
+ * map, and the rest are primitives. The store actions these components read are
+ * stable references, so they never cause a render on their own.
+ */
+export const MediumTask = memo(MediumTaskImpl);

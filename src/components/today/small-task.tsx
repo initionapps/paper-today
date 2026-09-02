@@ -1,5 +1,7 @@
 "use client";
 
+import { memo } from "react";
+
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 
@@ -19,7 +21,7 @@ import { DragHandle } from "./drag-handle";
  * No card, no border, no project name — a checklist line. Present, but never
  * competing for attention with the work above it.
  */
-export function SmallTask({
+function SmallTaskImpl({
   task,
   project,
   today,
@@ -95,3 +97,13 @@ export function SmallTask({
     </div>
   );
 }
+
+/**
+ * See BigTask.
+ *
+ * Safe because every prop is stable by construction: `task` keeps its object
+ * identity unless that row actually changed, `project` comes from a memoised
+ * map, and the rest are primitives. The store actions these components read are
+ * stable references, so they never cause a render on their own.
+ */
+export const SmallTask = memo(SmallTaskImpl);
