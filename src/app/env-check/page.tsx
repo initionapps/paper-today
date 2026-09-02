@@ -77,6 +77,41 @@ export default async function EnvCheckPage() {
     renderedAt: new Date().toISOString(),
   };
 
+  /**
+   * Every Supabase-ish variable actually present, by name.
+   *
+   * Added because a redeploy did not change the value: if the key is sitting in
+   * a *differently named* variable — which is what the Supabase Vercel
+   * integration does, and what would explain a manual edit appearing to have no
+   * effect — nothing above would ever reveal it. Names, lengths and shapes
+   * only; anything whose name suggests a secret shows no characters at all.
+   */
+  const interesting = /SUPABASE|POSTGRES|DATABASE/i;
+  const secretish = /SECRET|SERVICE_ROLE|PASSWORD|PRIVATE|JWT/i;
+  const inventory = Object.keys(env)
+    .filter((k) => interesting.test(k))
+    .sort()
+    .map((k) => {
+      const v = env[k] ?? "";
+      const hide = secretish.test(k);
+      return {
+        name: k,
+        length: v.length,
+        first6: hide ? "•••••• hidden" : v.slice(0, 6),
+        shape: v.startsWith("sb_publishable_")
+          ? "publishable key ✅"
+          : v.startsWith("sb_secret_")
+            ? "SECRET KEY — must not be here"
+            : v.startsWith("eyJ")
+              ? "JWT (legacy anon or service_role)"
+              : v.startsWith("http")
+                ? "a URL"
+                : v.startsWith("postgres")
+                  ? "a connection string"
+                  : "—",
+      };
+    });
+
   const stale =
     !!runtimeKey && !!builtKey && runtimeKey !== builtKey;
 
@@ -109,6 +144,42 @@ export default async function EnvCheckPage() {
               <tr key={k}>
                 <td style={{ padding: "3px 16px 3px 0", opacity: 0.7 }}>{k}</td>
                 <td style={{ padding: "3px 0", fontFamily: "ui-monospace, monospace" }}>{v}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </section>
+
+      <section style={{ marginTop: 24 }}>
+        <h2 style={{ fontSize: 15, fontWeight: 600 }}>
+          Every Supabase-related variable present in this environment
+        </h2>
+        <p style={{ fontSize: 12.5, opacity: 0.75, marginTop: 4 }}>
+          Names and shapes only. Anything whose name suggests a secret shows no characters.
+        </p>
+        <table style={{ marginTop: 8, borderCollapse: "collapse", fontSize: 12.5 }}>
+          <thead>
+            <tr style={{ opacity: 0.6, textAlign: "left" }}>
+              <th style={{ paddingRight: 16 }}>name</th>
+              <th style={{ paddingRight: 16 }}>len</th>
+              <th style={{ paddingRight: 16 }}>first 6</th>
+              <th>shape</th>
+            </tr>
+          </thead>
+          <tbody>
+            {inventory.length === 0 && (
+              <tr>
+                <td colSpan={4} style={{ padding: "4px 0" }}>
+                  none found
+                </td>
+              </tr>
+            )}
+            {inventory.map((r) => (
+              <tr key={r.name}>
+                <td style={{ paddingRight: 16, fontFamily: "ui-monospace, monospace" }}>{r.name}</td>
+                <td style={{ paddingRight: 16, fontFamily: "ui-monospace, monospace" }}>{r.length}</td>
+                <td style={{ paddingRight: 16, fontFamily: "ui-monospace, monospace" }}>{r.first6}</td>
+                <td>{r.shape}</td>
               </tr>
             ))}
           </tbody>
