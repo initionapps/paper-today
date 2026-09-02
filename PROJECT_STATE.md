@@ -436,6 +436,27 @@ Each of these was a real bug that took real debugging.
 - **`app/layout.tsx` had a stale `TestHook` import twice in this phase.** If a
   temporary debug component is mounted, delete the file *and* both lines in the
   layout, then `grep` for the name before claiming it is gone.
+- **`process.env.NEXT_PUBLIC_X` written as a literal is replaced at *build*
+  time — in server code too, not just the browser.** So a server component
+  reading it that way reports what the build baked in, not the environment. To
+  read the real runtime environment, look the name up dynamically
+  (`process.env[["NEXT","PUBLIC",…].join("_")]`), which the bundler cannot fold
+  into a literal. Without that distinction a stale build and a wrong variable
+  are indistinguishable — which cost several rounds of diagnosis in production.
+- **"Is it defined?" proves nothing about an env var.** Production spent a day
+  returning `401 Invalid API key` because
+  `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` contained the *project URL*: a
+  non-empty, whitespace-clean, correctly-named string that passed every
+  presence check and made `supabaseEnv()` perfectly happy. What identified it
+  was **length + first six characters** against a known-good baseline (40/
+  `https:` = the URL; 46/`sb_pub` = the key), plus a live probe that actually
+  called Supabase with the value. Diagnose config by *shape and effect*, never
+  by existence.
+- **Never hand someone a block of CLI commands where one is interactive.**
+  `vercel env add` waits for a value on stdin; pasted as a block, it swallowed
+  the *next command line* and stored it as the key (66 chars beginning
+  `npx ve`). Pipe the value in instead — `… | vercel env add NAME production` —
+  so there is no prompt to hijack.
 
 ---
 

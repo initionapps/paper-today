@@ -31,11 +31,6 @@ export const config = {
    * themselves; they neither need nor want one refreshed underneath them.
    */
   matcher: [
-    // `env-check` is TEMPORARY, and excluded for the same class of reason as
-    // `auth/`: this proxy calls `supabaseEnv()`, which throws when either
-    // variable is missing, so a misconfigured deployment 500s on every matched
-    // route — including the page whose whole purpose is to say what is
-    // misconfigured. Remove this along with the route.
-    "/((?!auth/|env-check|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|woff2?)$).*)",
+    "/((?!auth/|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|woff2?)$).*)",
   ],
 };
