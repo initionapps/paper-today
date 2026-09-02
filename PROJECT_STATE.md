@@ -41,14 +41,26 @@ clean; keep them that way.
 | Local backup & restore (Settings) | done |
 | Routines: create/edit, recurrence, fixed time, daily override, archive | done |
 | **Recurring weekly work hours** (Schedule availability defaults) | remaining |
-| **Supabase / auth** | not started |
+| Supabase client wiring (`@supabase/ssr`, browser + server) | done |
+| **Supabase schema / auth / data migration** | not started |
 
 Routes: `/today` · `/schedule` · `/tasks` · `/projects` · `/projects/[id]` ·
 `/settings`. `/` redirects to `/today`.
 
-**Nothing is server-side.** No Supabase, no SQLite, no cloud, no auth. The SQL
-in `supabase/migrations/0001_init.sql` is a design artifact that has **never
-been applied**; it exists so the client store is shaped like the eventual rows.
+**No data is server-side yet.** The Supabase *client* is wired up — `@supabase/ssr`
+with a browser and a server helper in `src/lib/supabase/`, reading
+`NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` from
+`.env.local` — but nothing imports it, so every byte of state still lives in
+zustand and `localStorage`. There is no auth, and no secret/service-role key
+anywhere in the project.
+
+The SQL in `supabase/migrations/0001_init.sql` is a design artifact that has
+**never been applied**; it exists so the client store is shaped like the
+eventual rows. It is edited in place for exactly that reason — see
+[`docs/SCHEMA.md`](docs/SCHEMA.md), which also covers the ownership model:
+every row belongs to one `auth.users` id, cross-user references are blocked by
+composite foreign keys, and RLS is enforced by the database rather than by any
+query the app writes.
 
 ---
 
@@ -216,6 +228,7 @@ src/
     schedule.ts   pure minute/pixel maths, intervals, lanes, capacity
     palette.ts    accent classes — plain data, no React, no import cycles
     backup.ts     export envelope + strict validation
+    supabase/     browser + server clients; env read literally, in one place
     store/        the seam Supabase will slot into
     mock/seed.ts  demo data; delete when Supabase lands
 ```

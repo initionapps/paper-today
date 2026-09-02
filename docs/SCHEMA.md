@@ -1,8 +1,15 @@
 # Database schema — decisions and rationale
 
 DDL: [`supabase/migrations/0001_init.sql`](../supabase/migrations/0001_init.sql).
-Not applied yet — Supabase is not started. It exists now because the client
-store is deliberately shaped like these rows, so the swap is mechanical.
+**Still not applied** — the Supabase *client* is wired up, but no data flows
+through it and this file has never been run against a database. It exists now
+because the client store is deliberately shaped like these rows, so the swap is
+mechanical.
+
+Because it has never been applied, it is edited **in place** rather than
+corrected by follow-up migrations: a `0002` fixing a `0001` that never ran
+would describe a history that did not happen. The moment it *is* applied that
+stops being true, and everything after it becomes an additive migration.
 
 ```
 profiles ──┬── projects ──┐
@@ -156,6 +163,15 @@ change appearance on completion and what a future review screen will read.
 Archive is a status rather than a delete, so archived work stays queryable and
 "Archive" never feels destructive.
 
+`tasks` has deliberately **no `archived_at`** beside that status. An earlier
+draft carried both, which is the same "two columns describing one fact can
+disagree" trap that decision 4b rejects for projects — just pointing the other
+way. The two tables land on opposite single sources of truth on purpose:
+`projects` uses a nullable timestamp (there is no other project state to
+model), `tasks` uses the status enum (which already has to exist for
+open/done). The cost is that a task does not record *when* it was archived;
+nothing reads that today, and adding it later is one column.
+
 ## What the Schedule view will read
 
 One query per day, union of two shapes — tasks and routine logs share only the
@@ -195,9 +211,96 @@ Without these steps, data already saved during real use would fail to match its
 new shape and vanish, so `migratePersisted` in `day-store.ts` is load-bearing,
 not housekeeping.
 
+## Ownership
+
+Every account is a **private personal workspace**. There are no teams, no
+shared workspaces, no collaborators, no roles, no admin model — and the schema
+is shaped so that adding one later is a visible change, not an accident.
+
+Every user-owned table carries `user_id uuid not null default auth.uid()
+references auth.users (id) on delete cascade`. `profiles` is the exception in
+form only: its primary key *is* the auth user id.
+
+Two details in that line are load-bearing:
+
+- **`default auth.uid()`** means the client never sends an owner at all. There
+  is no field for it to get wrong, and an unauthenticated insert resolves to
+  `NULL` and dies on the `NOT NULL` — it fails closed rather than open.
+- **`on delete cascade`** from `auth.users` makes deleting the account erase
+  every row belonging to it, with no orphans and no cleanup job. Note that
+  *triggering* that delete needs admin credentials (the service-role key), so
+  it is a dashboard/server operation, never something the browser client can do.
+
+`routine_logs` and `notes` carry their own `user_id` rather than reaching it
+through a parent, so no policy needs a join — a join inside a policy is
+evaluated per row and is the usual reason Supabase apps get slow.
+
+### Cross-user references are impossible, not merely unlikely
+
+Only two foreign keys point between user-owned tables: `tasks → projects` and
+`routine_logs → routines`. Both carry `user_id` **into the key**:
+
+```sql
+constraint tasks_project_same_owner
+  foreign key (project_id, user_id) references projects (id, user_id)
+  on delete set null (project_id)
+```
+
+This is not decoration. **Referential-integrity checks run with elevated
+privilege and ignore RLS.** With a plain `references projects (id)`, a request
+could insert a task whose own `user_id` is honestly `auth.uid()` — passing the
+RLS check — while `project_id` pointed at *someone else's* project, and the
+foreign key would validate it. The row would be unreadable to its owner's
+victim and invisible in the UI, but it would exist. Carrying `user_id` into the
+key forces the referenced project to share the owner, and the engine enforces
+that on every path: no client, API or hand-written SQL can route around it.
+
+Three consequences worth knowing:
+
+- Each parent needs a `unique (id, user_id)` for the composite key to target.
+  `id` is already unique alone; those constraints exist purely so the FK has
+  something to reference.
+- The **column list on `set null` is required**, not stylistic. A bare
+  `on delete set null` would try to null `user_id` as well and fail its
+  `NOT NULL`, which would make projects undeletable. Needs PostgreSQL 15+.
+- Matching is `MATCH SIMPLE`, so a task with `project_id is null` skips the
+  check entirely — exactly right for "no project". There is no partial-null
+  loophole, because `user_id` is never null.
+
+`routine_logs` cascades instead of nulling: a log without its routine means
+nothing, where a task without a project is an ordinary backlog item.
+
 ## Row-level security
 
-Every table is RLS-enabled with a single `auth.uid() = user_id` policy for all
-operations. `routine_logs` and `notes` carry their own `user_id` (denormalised
-from their parent) so no policy needs a join — a join in a policy is evaluated
-per row and is the usual reason Supabase apps get slow.
+RLS is enabled on all nine tables, with **four explicit policies each** —
+`select`, `insert`, `update`, `delete` — rather than one `for all`. The two are
+functionally equivalent; the split is for auditability. You can see at a glance
+that DELETE is restricted, and one command can change later without silently
+reopening the others.
+
+```sql
+create policy tasks_select_own on tasks for select to authenticated
+  using ((select auth.uid()) = user_id);
+create policy tasks_insert_own on tasks for insert to authenticated
+  with check ((select auth.uid()) = user_id);
+create policy tasks_update_own on tasks for update to authenticated
+  using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
+create policy tasks_delete_own on tasks for delete to authenticated
+  using ((select auth.uid()) = user_id);
+```
+
+- **`to authenticated`.** Omitting the role attaches a policy to `public`,
+  which includes `anon`. That is safe by accident — `auth.uid()` is `NULL`
+  there and `NULL = user_id` is never true — but naming the role states the
+  intent and skips the check for anonymous requests entirely.
+- **`(select auth.uid())`, never bare `auth.uid()`.** The subselect is
+  evaluated once per query as an InitPlan instead of once per row. Under RLS
+  that is the difference between an index scan and a slow one.
+- **UPDATE carries both `using` and `with check`.** `using` decides which rows
+  may be touched; `with check` validates the row *after* the write. Without the
+  second one, a user could hand a row to another account by rewriting
+  `user_id`.
+
+The database enforces this isolation by itself. Application-level filtering is
+not a substitute and is not relied on anywhere: if every query in the client
+forgot its `where user_id = …`, the result would be no rows, not a leak.
