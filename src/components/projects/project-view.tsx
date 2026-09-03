@@ -76,7 +76,7 @@ export function ProjectView({ projectId }: { projectId: string }) {
             value={project.name}
             onCommit={(name) => updateProject(project.id, { name })}
             ariaLabel={copy.a11y.projectName}
-            className="font-display text-[2.1rem] font-bold leading-tight tracking-[-0.022em] text-text"
+            className="font-display text-[1.5rem] sm:text-[2.1rem] font-bold leading-tight tracking-[-0.022em] text-text"
           />
           <EditableText
             value={project.description}

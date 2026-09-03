@@ -7,6 +7,7 @@ import { Section, type SectionAccent } from "@/components/ui/section";
 import { UndoToast } from "@/components/today/undo-toast";
 import { activeProjects, activeTasks, groupByBucket, useDayStore } from "@/lib/store/day-store";
 import { useAccountReady } from "@/lib/supabase/account";
+import { MobileFilters } from "./mobile-filters";
 import { dateBucket, shiftDay, todayKey, tomorrowOf } from "@/lib/date";
 import { copy } from "@/lib/copy";
 import { cn } from "@/lib/cn";
@@ -47,6 +48,12 @@ export function AllTasksView() {
   const hydrated = useAccountReady();
   const [filters, setFilters] = useState<Filters>(NO_FILTERS);
   const [upcomingDate, setUpcomingDate] = useState<DayKey>(() => shiftDay(todayKey(), 2));
+  /**
+   * Mobile-only text search. It narrows the same list the filters narrow, so
+   * the two compose; it is not a separate mode. Desktop has no search field, so
+   * this stays empty there and the filter below is a no-op.
+   */
+  const [query, setQuery] = useState("");
 
   const tasks = useDayStore((s) => s.tasks);
   const projects = useDayStore((s) => s.projects);
@@ -54,7 +61,19 @@ export function AllTasksView() {
 
   const projectById = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects]);
   const open = useMemo(() => activeTasks(tasks), [tasks]);
-  const visible = useMemo(() => open.filter((t) => matches(t, filters, today)), [open, filters, today]);
+  const needle = query.trim().toLowerCase();
+  const visible = useMemo(
+    () =>
+      open
+        .filter((t) => matches(t, filters, today))
+        .filter(
+          (t) =>
+            needle === "" ||
+            t.title.toLowerCase().includes(needle) ||
+            (t.detail ?? "").toLowerCase().includes(needle),
+        ),
+    [open, filters, today, needle],
+  );
   const groups = useMemo(() => groupByBucket(visible, today), [visible, today]);
 
   const filtering = isFiltering(filters);
@@ -72,18 +91,33 @@ export function AllTasksView() {
   return (
     <>
       <header>
-        <h1 className="font-display text-[2.25rem] font-bold leading-tight tracking-[-0.022em] text-text">
+        <h1 className="font-display text-[1.6rem] sm:text-[2.25rem] font-bold leading-tight tracking-[-0.022em] text-text">
           {copy.allTasks.title}
         </h1>
         <p className="mt-1.5 text-[14px] text-text-2">{copy.allTasks.subtitle(open.length)}</p>
       </header>
 
       {/* filter by projects you're still working on; archived ones stay out */}
-      <FilterBar filters={filters} onChange={setFilters} projects={activeProjects(projects)} />
+      {/* Desktop keeps the three always-visible rows, unchanged. */}
+      <div className="hidden sm:block">
+        <FilterBar filters={filters} onChange={setFilters} projects={activeProjects(projects)} />
+      </div>
+
+      <MobileFilters
+        filters={filters}
+        onChange={setFilters}
+        projects={activeProjects(projects)}
+        query={query}
+        onQueryChange={setQuery}
+      />
 
       {visible.length === 0 && (
         <p className="mt-14 text-[15px] text-text-3">
-          {filtering ? copy.allTasks.emptyFiltered : copy.allTasks.empty}
+          {needle !== ""
+            ? copy.allTasks.noSearchResults
+            : filtering
+              ? copy.allTasks.emptyFiltered
+              : copy.allTasks.empty}
         </p>
       )}
 

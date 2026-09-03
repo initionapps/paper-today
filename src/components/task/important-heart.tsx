@@ -67,7 +67,7 @@ export function ImportantHeart({
         onToggle();
       }}
       className={cn(
-        "flex shrink-0 cursor-pointer items-center justify-center outline-none",
+        "tap-target flex shrink-0 cursor-pointer items-center justify-center outline-none",
         step.box,
         "transition-[opacity,transform,color] duration-150 active:scale-90",
         "focus-visible:ring-2 focus-visible:ring-blue/45 focus-visible:ring-offset-2 focus-visible:ring-offset-surface",

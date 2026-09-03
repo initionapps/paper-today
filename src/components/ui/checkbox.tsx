@@ -46,7 +46,7 @@ export function Checkbox({
       aria-label={label}
       onClick={onChange}
       className={cn(
-        "group/check shrink-0 cursor-pointer rounded-lg outline-none",
+        "group/check tap-target shrink-0 cursor-pointer rounded-lg outline-none",
         "focus-visible:ring-2 focus-visible:ring-blue/45 focus-visible:ring-offset-2 focus-visible:ring-offset-surface",
         s.box,
         className,

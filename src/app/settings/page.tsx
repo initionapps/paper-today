@@ -9,7 +9,7 @@ export default async function SettingsPage() {
 
   return (
     <AppShell>
-      <h1 className="font-display text-[2.25rem] font-bold leading-tight tracking-[-0.022em] text-text">
+      <h1 className="font-display text-[1.6rem] sm:text-[2.25rem] font-bold leading-tight tracking-[-0.022em] text-text">
         {copy.settings.title}
       </h1>
 

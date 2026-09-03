@@ -91,6 +91,36 @@ body {
  * field would render at body size instead of the size of the thing it becomes.
  */
 @layer components {
+  /**
+   * Grows a small control's tappable area to ~44px without changing how it
+   * looks or what it occupies.
+   *
+   * The checkbox, the heart and the ⋯ menu are drawn at 17–22px, which is right
+   * for the visual language and far too small for a thumb. Padding them would
+   * push the layout around; this puts an invisible, absolutely-positioned
+   * target over the glyph instead, so the card is laid out exactly as before.
+   *
+   * Coarse pointers only. A mouse is precise enough to hit a 17px checkbox, and
+   * on desktop an oversized invisible target would swallow clicks meant for the
+   * text beside it.
+   */
+  @media (pointer: coarse) {
+    .tap-target {
+      position: relative;
+    }
+    .tap-target::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      translate: -50% -50%;
+      width: max(100%, 44px);
+      height: max(100%, 44px);
+      /* the glyph itself still paints above this */
+      z-index: 0;
+    }
+  }
+
   .bare-input {
     background: transparent;
     border: 0;

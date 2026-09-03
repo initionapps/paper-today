@@ -14,6 +14,21 @@ export const copy = {
     projects: "פרויקטים",
   },
 
+  /**
+   * The bottom bar on phones. Labels are shorter than the desktop nav's on
+   * purpose — five of them share 360px, and "כל המשימות" does not fit under an
+   * icon without wrapping or truncating.
+   */
+  mobileNav: {
+    today: "היום",
+    schedule: "לוח",
+    tasks: "משימות",
+    projects: "פרויקטים",
+    more: "עוד",
+    moreTitle: "עוד",
+    close: "סגור",
+  },
+
   auth: {
     signInTitle: "כניסה",
     signInSubtitle: "יום אחד, עמוד אחד.",
@@ -140,6 +155,14 @@ export const copy = {
     emptyFiltered: "אין משימות שמתאימות לסינון.",
     clearFilters: "נקה סינון",
     filterSize: "גודל",
+    /** Mobile only: the three filter rows collapse behind one control. */
+    search: "חיפוש משימות",
+    searchClear: "נקה חיפוש",
+    filterAction: "סינון",
+    filterSheetTitle: "סינון",
+    filterApply: "הצג תוצאות",
+    activeFilters: "סינון פעיל",
+    noSearchResults: "אין משימות שתואמות לחיפוש.",
     filterProject: "פרויקט",
     filterDate: "תאריך",
     due: (date: string) => `דדליין ${date}`,

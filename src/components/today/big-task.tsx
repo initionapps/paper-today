@@ -51,7 +51,7 @@ function BigTaskImpl({ task, project, today }: { task: Task; project?: Project; 
       <div
         className={cn(
           "relative overflow-hidden rounded-2xl border bg-surface transition-all duration-300",
-          "p-6 sm:p-7",
+          "p-4 sm:p-7",
           done
             ? "shadow-flat border-line-soft opacity-60"
             : "shadow-feature border-line-soft hover:border-blue/30",
@@ -80,7 +80,9 @@ function BigTaskImpl({ task, project, today }: { task: Task; project?: Project; 
               onCommit={(next) => renameTask(task.id, next)}
               ariaLabel={copy.a11y.taskTitle}
               className={cn(
-                "font-display text-[1.75rem] font-semibold leading-[1.35] tracking-[-0.015em] transition-colors duration-300",
+                // 28px over a 328px column turns a long Hebrew title into eight lines.
+                "font-display text-[1.35rem] leading-[1.3] sm:text-[1.75rem] sm:leading-[1.35]",
+                "font-semibold tracking-[-0.015em] transition-colors duration-300",
                 done ? "text-text-2 line-through decoration-text-3/60 decoration-1" : "text-text",
               )}
             />

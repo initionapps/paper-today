@@ -17,7 +17,7 @@ export function MottoLine() {
   const setMotto = useDayStore((s) => s.setMotto);
 
   return (
-    <div className="mb-4 mt-10 px-4">
+    <div className="mb-3 mt-5 px-0 sm:mb-4 sm:mt-10 sm:px-4">
       <EditableText
         value={motto}
         onCommit={setMotto}

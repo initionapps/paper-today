@@ -177,7 +177,7 @@ export function TodayView() {
         onDragCancel={() => setActiveId(null)}
       >
         {/* -------------------------------------------------------- big */}
-        <Section title={copy.sections.big} accent="blue" count={sections.big.length} className="mt-14">
+        <Section title={copy.sections.big} accent="blue" count={sections.big.length} className="mt-8 sm:mt-14">
           <SectionDrop size="big">
             <SortableContext items={sections.big.map((t) => t.id)} strategy={verticalListSortingStrategy}>
               <div className="mt-5 space-y-3">
@@ -205,7 +205,7 @@ export function TodayView() {
           title={copy.sections.medium}
           accent="purple"
           count={sections.medium.length}
-          className="mt-16"
+          className="mt-10 sm:mt-16"
         >
           <SectionDrop size="medium">
             <SortableContext items={sections.medium.map((t) => t.id)} strategy={rectSortingStrategy}>
@@ -230,7 +230,7 @@ export function TodayView() {
         </Section>
 
         {/* ------------------------------------------------------ small */}
-        <Section title={copy.sections.small} accent="grey" count={sections.small.length} className="mt-16">
+        <Section title={copy.sections.small} accent="grey" count={sections.small.length} className="mt-10 sm:mt-16">
           <SectionDrop size="small">
             <SortableContext items={sections.small.map((t) => t.id)} strategy={rectSortingStrategy}>
               <div className="mt-4 grid grid-cols-1 gap-x-10 sm:grid-cols-2">
@@ -258,7 +258,7 @@ export function TodayView() {
           title={copy.sections.routines}
           accent="teal"
           count={dayRoutines.length}
-          className="mt-16"
+          className="mt-10 sm:mt-16"
         >
           <SortableContext items={dayRoutines.map((r) => r.id)} strategy={rectSortingStrategy}>
             <div className="mt-4 grid grid-cols-1 gap-x-10 sm:grid-cols-2">

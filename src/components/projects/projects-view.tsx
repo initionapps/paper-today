@@ -34,7 +34,7 @@ export function ProjectsView() {
   return (
     <>
       <header>
-        <h1 className="font-display text-[2.25rem] font-bold leading-tight tracking-[-0.022em] text-text">
+        <h1 className="font-display text-[1.6rem] sm:text-[2.25rem] font-bold leading-tight tracking-[-0.022em] text-text">
           {copy.projects.title}
         </h1>
         <p className="mt-1.5 text-[14px] text-text-2">{copy.projects.subtitle(active.length)}</p>

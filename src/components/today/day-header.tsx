@@ -10,7 +10,7 @@ export function DayHeader({ day, done, total }: { day: DayKey; done: number; tot
   return (
     <header className="flex flex-wrap items-end justify-between gap-4">
       <div>
-        <h1 className="font-display text-[2.6rem] font-bold leading-[1.05] tracking-[-0.025em] text-text">
+        <h1 className="font-display text-[1.75rem] sm:text-[2.6rem] font-bold leading-[1.05] tracking-[-0.025em] text-text">
           {weekdayName(day)}
         </h1>
         <p className="mt-1.5 text-[14px] text-text-2">{longDate(day)}</p>

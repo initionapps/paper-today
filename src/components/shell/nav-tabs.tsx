@@ -57,7 +57,10 @@ export function NavTabs() {
   const shown = pending ?? pathname;
 
   return (
-    <nav className="mb-10 flex items-center gap-1">
+    // Hidden on phones, where `MobileNav` takes over. This row needs 392px for
+    // its five Hebrew labels plus sign-out and was the single largest source of
+    // horizontal overflow in the app — at 360px it pushed every page sideways.
+    <nav className="mb-10 hidden items-center gap-1 sm:flex">
       {TABS.map((tab) => {
         // /projects stays lit while you're inside /projects/<id>
         const active = matches(shown, tab.href);
