@@ -213,8 +213,23 @@ export function ScheduleView() {
       />
 
       <DndContext sensors={sensors} onDragEnd={onDragEnd}>
-        {/* RTL: the sidebar is first in flow, so it sits on the right */}
-        <div className="mt-6 flex flex-col gap-4 sm:flex-row">
+        {/*
+          RTL: the sidebar is first in flow, so it sits on the right.
+
+          On phones the column is *reversed*, which puts the rail above the
+          sidebar: you decide where a task goes by first seeing what the day
+          already looks like, and on a narrow screen the list of unscheduled
+          tasks would otherwise push the rail off the fold entirely.
+
+          `flex-col-reverse` rather than `order-*` on the children because it
+          needs no new props and touches neither component. `sm:flex-row`
+          overrides the direction outright from 640px up, so the desktop layout
+          — sidebar right, rail left — is exactly as it was.
+
+          Only the *visual* order changes; the DOM order is untouched, so drag
+          and drop, focus order and reading order all behave as before.
+        */}
+        <div className="mt-6 flex flex-col-reverse gap-4 sm:flex-row">
           <ScheduleSidebar
             tasks={dayTasks}
             routines={sidebarRoutines}
