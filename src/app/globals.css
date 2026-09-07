@@ -6,7 +6,12 @@
 
 /* ------------------------------------------------------------------ theme
  * Clean futuristic soft: a cool light canvas, white surfaces, near-black text,
- * and colour used only as accent. Nothing warm, nothing textured.
+ * and colour used only as accent. Nothing textured.
+ *
+ * Warmth appears exactly once — the gold on a Big task, below. It reads as
+ * warm *because* everything around it is cool, which is the whole reason one
+ * hairline and a 3%-saturated tint are enough to mark the day's big work
+ * without raising its voice.
  */
 @theme {
   --color-canvas: #f5f7fa;
@@ -37,6 +42,27 @@
    * project palette above: an amber mark must never read as someone's colour. */
   --color-amber: #f59e0b;
 
+  /* Big tasks, and nothing else.
+   *
+   * Size and project are two different facts and must not share a channel: the
+   * accent strip stays the project's colour, so importance needs a mark that no
+   * project can ever wear. Gold is kept out of the palette above for exactly
+   * the reason amber is — if a project could be gold, gold would stop meaning
+   * "big".
+   *
+   * Three values, each doing one job:
+   *   gold        the accent itself. Only ever used at partial opacity, for the
+   *               hover border. Never a fill — at full strength it is jewellery.
+   *   gold-line   the hairline frame. L≈71% against a 91% neutral border, so it
+   *               is unmistakably a *different* card at a glance, and still a
+   *               hairline up close.
+   *   gold-soft   the tint. 97% lightness — a cream you notice only next to the
+   *               white Medium cards, which is the only place it has to work.
+   */
+  --color-gold: #c9a227;
+  --color-gold-line: #ddc78e;
+  --color-gold-soft: #fdfaf1;
+
   /* The Schedule's availability ladder. Each rung is a clearly visible step
    * down in brightness, so "can I work then?" is answered by lightness alone:
    *   white      working hours — the usable part of the day
@@ -60,8 +86,13 @@
 
   --font-sans: var(--font-assistant), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-display: var(--font-rubik), var(--font-assistant), ui-sans-serif, system-ui, sans-serif;
-  /* the daily motto only — never UI chrome */
-  --font-hand: var(--font-hand-face), var(--font-assistant), ui-rounded, cursive;
+  /* The daily motto only — never UI chrome. If the local Dana Yad file ever
+   * fails to load, this falls back to the app's own Hebrew sans first — a
+   * missing handwriting font should degrade to "plain," not to whatever
+   * script face a given OS happens to ship for the `cursive` generic, which
+   * could clash with the rest of the page far more than a calm sans would.
+   * `ui-rounded`/`cursive` are there only as the last resort under that. */
+  --font-quote: var(--font-quote-face), var(--font-assistant), ui-rounded, cursive;
 }
 
 /* ------------------------------------------------------------------ base */
@@ -139,19 +170,14 @@ body {
   }
 }
 
-/* Gveret Levin ships a single weight, and no browser will synthesise a
- * *lighter* one — `font-weight: 300` renders identically to 400. The only real
- * way to thin it is to erode the glyph edges with a hairline stroke painted in
- * the page colour (the stroke paints over the fill, eating inward by half its
- * width).
- *
- * That ties this class to the canvas background, so it belongs to the motto
- * alone — on any other surface the stroke colour would have to change with it.
- */
-.hand-thin {
-  /* 0.5px removes ~13% of the ink. Past ~0.65px whole strokes start dropping
-   * out rather than thinning, which reads as broken instead of light. */
-  -webkit-text-stroke: 0.5px var(--color-canvas);
+/* Dana Yad ships one weight, and it reads as thinner than this line wants at
+ * its size. `currentColor` rather than a fixed hex, so it tracks the motto's
+ * hover state automatically instead of needing its own colour kept in sync —
+ * the opposite problem the old `hand-thin` erosion hack had, tied as it was
+ * to one fixed background. 0.4px thickens the strokes without closing any of
+ * the script's loops or fusing letters that are meant to stay separate. */
+.hand-bold {
+  -webkit-text-stroke: 0.4px currentColor;
 }
 
 /* Times, ranges and other Latin/numeric runs stay LTR inside RTL text. */
@@ -171,11 +197,15 @@ body {
     0 1px 2px rgb(16 24 40 / 0.04),
     0 8px 20px -12px rgb(16 24 40 / 0.14);
 }
-/* the Big card gets a whisper of blue in its shadow rather than more darkness */
+/* The Big card. Now that the card carries a gold frame and a cream tint, the
+ * old blue-lit glow was a second, contradictory accent underneath a warm one —
+ * so the shadow went warm and got shallower. It is not elevation any more; it
+ * is just enough separation to keep the cream from sitting flat on the canvas.
+ */
 .shadow-feature {
   box-shadow:
-    0 1px 2px rgb(16 24 40 / 0.04),
-    0 10px 26px -14px rgb(59 130 246 / 0.34);
+    0 1px 2px rgb(16 24 40 / 0.03),
+    0 6px 16px -12px rgb(146 110 30 / 0.3);
 }
 .shadow-float {
   box-shadow:

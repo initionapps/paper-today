@@ -18,8 +18,20 @@ import type { DayKey, Project, Task } from "@/lib/types";
 import { DragHandle } from "./drag-handle";
 
 /**
- * No card, no border, no project name — a checklist line. Present, but never
- * competing for attention with the work above it.
+ * The lightest card in the ladder — but a card.
+ *
+ * This used to be a bare checklist line: no fill, no border, sitting straight
+ * on the canvas. That made it recessive, which was the intent, and also made it
+ * *washed out* — with nothing to sit on, a 14px line at 60% opacity when done
+ * reads as page furniture rather than as work. Being lower in the hierarchy and
+ * being hard to see are not the same thing.
+ *
+ * So it gains the least card it can have: a white fill against the cool canvas,
+ * the softer of the two hairlines, and no elevation at all. Everything that
+ * makes Medium heavier is deliberately withheld — Medium gets the stronger
+ * border, the larger radius, more padding, 16px medium type and a whisper of
+ * shadow; this gets none of those. The step down is carried by five small
+ * differences at once rather than by absence.
  */
 function SmallTaskImpl({
   task,
@@ -46,8 +58,12 @@ function SmallTaskImpl({
       ref={setNodeRef}
       style={{ transform: CSS.Translate.toString(transform), transition }}
       className={cn(
-        "group relative flex items-start gap-2.5 rounded-lg py-1.5 transition-opacity duration-300",
-        done && "opacity-60",
+        "group relative flex items-start gap-2.5 rounded-lg border bg-surface px-3 py-2",
+        // Not `transition-all`: the properties are named so that a viewport
+        // change can't animate the padding, and so dnd-kit's inline transition
+        // during a sort stays the only thing moving the card.
+        "transition-[opacity,border-color] duration-300",
+        done ? "border-line-soft opacity-60" : "border-line-soft hover:border-line",
         isDragging && "opacity-30",
       )}
     >
@@ -55,7 +71,7 @@ function SmallTaskImpl({
         attributes={attributes}
         listeners={listeners}
         label={copy.a11y.reorder(task.title)}
-        className="absolute -start-[22px] top-1.5 h-5 w-4"
+        className="absolute -start-[22px] top-2 h-5 w-4"
       />
 
       <Checkbox

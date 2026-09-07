@@ -180,7 +180,7 @@ export function TodayView() {
         <Section title={copy.sections.big} accent="blue" count={sections.big.length} className="mt-8 sm:mt-14">
           <SectionDrop size="big">
             <SortableContext items={sections.big.map((t) => t.id)} strategy={verticalListSortingStrategy}>
-              <div className="mt-5 space-y-3">
+              <div className="mt-3.5 space-y-3">
                 {sections.big.map((task) => (
                   <BigTask
                     key={task.id}
@@ -195,7 +195,7 @@ export function TodayView() {
               variant="big"
               prompt={copy.compose.big}
               onAdd={(title) => addTask(day, "big", title)}
-              className="mt-3"
+              className="mt-2"
             />
           </SectionDrop>
         </Section>
@@ -205,18 +205,30 @@ export function TodayView() {
           title={copy.sections.medium}
           accent="purple"
           count={sections.medium.length}
-          className="mt-10 sm:mt-16"
+          className="mt-5.5 sm:mt-8.5"
         >
           <SectionDrop size="medium">
             <SortableContext items={sections.medium.map((t) => t.id)} strategy={rectSortingStrategy}>
-              <div className="mt-5 grid grid-cols-1 gap-x-8 gap-y-2.5 sm:grid-cols-2">
+              {/*
+                A two-column CSS grid gives every row the height of its tallest
+                cell — a task with a due date or a project tag sits next to one
+                without either, and the shorter card leaves visible white space
+                under it before the next row starts. That's not a gap in the
+                data, it's the row-major grid forcing pairs to match height.
+                CSS columns give each side its own running height instead, so a
+                short card is immediately followed by the next one, not by air.
+                `break-inside-avoid` on each wrapper keeps a card from being
+                split across the column break.
+              */}
+              <div className="mt-3.5 columns-1 gap-x-8 sm:columns-2">
                 {sections.medium.map((task) => (
-                  <MediumTask
-                    key={task.id}
-                    task={task}
-                    project={projectById.get(task.projectId ?? "")}
-                    today={day}
-                  />
+                  <div key={task.id} className="mb-2.5 break-inside-avoid">
+                    <MediumTask
+                      task={task}
+                      project={projectById.get(task.projectId ?? "")}
+                      today={day}
+                    />
+                  </div>
                 ))}
               </div>
             </SortableContext>
@@ -224,16 +236,19 @@ export function TodayView() {
               variant="medium"
               prompt={copy.compose.medium}
               onAdd={(title) => addTask(day, "medium", title)}
-              className="mt-2"
+              className="mt-1.5"
             />
           </SectionDrop>
         </Section>
 
         {/* ------------------------------------------------------ small */}
-        <Section title={copy.sections.small} accent="grey" count={sections.small.length} className="mt-10 sm:mt-16">
+        <Section title={copy.sections.small} accent="grey" count={sections.small.length} className="mt-5.5 sm:mt-8.5">
           <SectionDrop size="small">
             <SortableContext items={sections.small.map((t) => t.id)} strategy={rectSortingStrategy}>
-              <div className="mt-4 grid grid-cols-1 gap-x-10 sm:grid-cols-2">
+              {/* Small tasks and routines are cards now, not bare lines, so
+                  they need a row gap they never used to — and less of a column
+                  gap, since each one draws its own edge. */}
+              <div className="mt-3 grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-2">
                 {sections.small.map((task) => (
                   <SmallTask
                     key={task.id}
@@ -258,10 +273,10 @@ export function TodayView() {
           title={copy.sections.routines}
           accent="teal"
           count={dayRoutines.length}
-          className="mt-10 sm:mt-16"
+          className="mt-5.5 sm:mt-8.5"
         >
           <SortableContext items={dayRoutines.map((r) => r.id)} strategy={rectSortingStrategy}>
-            <div className="mt-4 grid grid-cols-1 gap-x-10 sm:grid-cols-2">
+            <div className="mt-3 grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-2">
               {dayRoutines.map((routine) => (
                 <RoutineLine
                   key={routine.id}
@@ -308,7 +323,7 @@ export function TodayView() {
               </button>
 
               {showArchivedRoutines && (
-                <div className="mt-2 grid grid-cols-1 gap-x-10 sm:grid-cols-2">
+                <div className="mt-2 grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-2">
                   {archivedRoutineList.map((routine) => (
                     <RoutineLine
                       key={routine.id}

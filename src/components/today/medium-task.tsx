@@ -7,7 +7,7 @@ import { CSS } from "@dnd-kit/utilities";
 
 import { EditableText } from "@/components/task/editable-text";
 import { ImportantHeart } from "@/components/task/important-heart";
-import { DueBadge, ProjectTag, ScheduledChip } from "@/components/task/task-meta";
+import { DueBadge, PROJECT_EDGE, ProjectTag, ScheduledChip } from "@/components/task/task-meta";
 import { TaskMenu } from "@/components/task/task-menu";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useDayStore } from "@/lib/store/day-store";
@@ -17,7 +17,20 @@ import type { DayKey, Project, Task } from "@/lib/types";
 
 import { DragHandle } from "./drag-handle";
 
-/** Two to a row, a hairline border, almost no elevation. Never competes with Big. */
+/**
+ * Two to a row, a hairline border, almost no elevation. Never competes with Big.
+ *
+ * The project strip is the one thing it borrows from Big, at the same 3px and
+ * the same full-strength colour — thin enough to read as a light cue rather
+ * than a decoration, but not dimmed, because a project's colour is an
+ * identifier and a faded one is a worse identifier. Unlike Big, which always
+ * shows a strip (blue when the task has no project), Medium shows nothing at
+ * all for a project-less task: Big's fallback exists because Big's edge is
+ * part of reading the card as "the important one" even without a project;
+ * Medium has no such role to protect, so an unearned strip would just be
+ * noise. Routines carry no project field in this data model, so they get no
+ * strip — there is no colour to show.
+ */
 function MediumTaskImpl({
   task,
   project,
@@ -54,10 +67,20 @@ function MediumTaskImpl({
 
       <div
         className={cn(
-          "shadow-flat rounded-xl border bg-surface px-4 py-3.5 transition-all duration-300",
+          "relative overflow-hidden shadow-flat rounded-xl border bg-surface px-4 py-3.5 transition-all duration-300",
           done ? "border-line-soft opacity-60" : "border-line hover:border-blue/25",
         )}
       >
+        {project && (
+          <span
+            className={cn(
+              "absolute inset-y-0 start-0 w-[3px] transition-opacity duration-300",
+              PROJECT_EDGE[project.color],
+              done && "opacity-30",
+            )}
+          />
+        )}
+
         <div className="flex items-start gap-3">
           <Checkbox
             size="md"

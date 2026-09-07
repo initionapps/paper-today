@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
-import { Assistant, Gveret_Levin, Rubik } from "next/font/google";
+import { Assistant, Rubik } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 
 import { SyncBanner } from "@/components/sync-banner";
@@ -23,13 +24,15 @@ const rubik = Rubik({
 });
 
 /**
- * The daily motto, and nothing else. A genuine Hebrew handwriting face — one
- * weight only (400), so the line must not ask for a lighter one.
+ * The daily motto, and nothing else — a genuine Hebrew handwriting face,
+ * licensed by the user (AlefAlefAlef's free-use terms; see the PDF shipped
+ * with the source download, not committed here). One weight only, so unlike
+ * the Google-served faces above there is no `weight`/`style` to request —
+ * whatever the file contains is what renders.
  */
-const gveretLevin = Gveret_Levin({
-  subsets: ["latin", "hebrew"],
-  weight: "400",
-  variable: "--font-hand-face",
+const danaYad = localFont({
+  src: "./fonts/DanaYadAlefAlefAlef-Normal.woff",
+  variable: "--font-quote-face",
   display: "swap",
 });
 
@@ -47,7 +50,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html
       lang="he"
       dir="rtl"
-      className={`${assistant.variable} ${rubik.variable} ${gveretLevin.variable}`}
+      className={`${assistant.variable} ${rubik.variable} ${danaYad.variable}`}
     >
       <body>
         {children}

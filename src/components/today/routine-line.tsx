@@ -18,8 +18,14 @@ import { RoutineEditor } from "./routine-editor";
 
 /**
  * A routine is not a task — no size, never in All Tasks, and ticking it writes
- * a per-day fact rather than completing anything. The round checkbox and the
- * repeat glyph say so before any label does.
+ * a per-day fact rather than completing anything. The round checkbox, the
+ * repeat glyph and the teal say so before any label does.
+ *
+ * Its *container*, though, is exactly SmallTask's: same fill, same hairline,
+ * same padding and radius, same lack of elevation. A routine and a small task
+ * carry the same weight in a day, so they should carry the same weight on the
+ * page — the difference between them is what is inside the card, not how much
+ * the card asks for. Keep the two containers in step if either changes.
  */
 function RoutineLineImpl({
   routine,
@@ -52,8 +58,9 @@ function RoutineLineImpl({
       ref={setNodeRef}
       style={{ transform: CSS.Translate.toString(transform), transition }}
       className={cn(
-        "group relative flex items-center gap-2.5 py-1.5 transition-opacity duration-300",
-        (done || archived) && "opacity-60",
+        "group relative flex items-center gap-2.5 rounded-lg border bg-surface px-3 py-2",
+        "transition-[opacity,border-color] duration-300",
+        done || archived ? "border-line-soft opacity-60" : "border-line-soft hover:border-line",
         isDragging && "opacity-30",
       )}
     >
@@ -61,7 +68,7 @@ function RoutineLineImpl({
         attributes={attributes}
         listeners={listeners}
         label={copy.a11y.reorder(routine.title)}
-        className="absolute -start-[22px] top-1.5 h-5 w-4"
+        className="absolute -start-[22px] top-2 h-5 w-4"
       />
 
       <Checkbox

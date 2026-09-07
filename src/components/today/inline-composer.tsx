@@ -9,10 +9,12 @@ type Variant = "big" | "medium" | "small";
 
 const TYPE: Record<Variant, { text: string; idle: string; gap: string; gapPx: number; ring: number }> = {
   big: {
-    text: "font-display text-[1.75rem] font-semibold leading-[1.35] tracking-[-0.015em]",
+    // tracks BigTask's title. You are writing the thing you are about to see,
+    // so it has to be set in the size it will land in.
+    text: "font-display text-[1.4rem] font-semibold leading-[1.35] tracking-[-0.015em]",
     idle: "text-[15px]",
-    gap: "gap-4",
-    gapPx: 16,
+    gap: "gap-3",
+    gapPx: 12,
     ring: 22,
   },
   medium: {

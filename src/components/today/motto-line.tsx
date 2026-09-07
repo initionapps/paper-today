@@ -24,16 +24,26 @@ export function MottoLine() {
         ariaLabel={copy.motto.label}
         placeholder={copy.motto.placeholder}
         /*
-         * Gveret Levin ships a single weight and no browser synthesises a
-         * lighter one, so the lightness is built from everything else: a
-         * smaller size, the paler grey, open leading, a touch of tracking —
-         * Hebrew letters don't join, so a little air between them reads as calm
-         * rather than broken — and `hand-thin`, which shaves the strokes with a
-         * hairline stroke in the page colour.
+         * Dana Yad — a genuine handwriting face, ships one weight only, so
+         * there is no `font-light`/`font-bold` to ask for; `hand-bold` (see
+         * globals.css) thickens the strokes by a fraction of a pixel instead,
+         * since the shipped weight read as too thin at this size.
+         *
+         * Tracking: reversed from "none" to "noticeably more" on request, and
+         * actually checked this time rather than assumed — at 0.05em the
+         * letters open up clearly without the word falling apart; past roughly
+         * 0.08em (tested up to 0.12em) they stop reading as one written word
+         * and start looking like separate stamped glyphs. Word-spacing gets
+         * its own, larger value on top, so the gap *between* words opens more
+         * than the gap within one — spacing that treats every gap alike reads
+         * as mechanical, not handwritten. Sized up slightly (21→22, 24→26) to
+         * carry the wider spacing without looking sparse.
+         *
+         * Colour: plain `text-2`, no hover recolour — `text-2` was already
+         * what hover switched to, and turned out to be the better resting
+         * colour outright.
          */
-        // deliberately between --color-text-3 and --color-text-2: the thinned
-        // strokes carry the lightness now, so the colour doesn't have to
-        className="font-hand hand-thin mx-auto max-w-[44ch] text-center text-[19px] font-normal leading-[1.8] tracking-[0.01em] text-[#848b98] transition-colors hover:text-text-2 sm:text-[21.5px]"
+        className="font-quote hand-bold mx-auto max-w-[46ch] text-center text-[22px] leading-[1.7] tracking-[0.05em] [word-spacing:0.12em] text-text-2 sm:text-[26px]"
       />
     </div>
   );
