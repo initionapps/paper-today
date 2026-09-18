@@ -33,7 +33,11 @@ export function YearHeader({
 }: {
   start: { year: number; month: number };
   end: { year: number; month: number };
-  /** Whether the window's first month is the real current month. */
+  /** Whether the window sits at its default anchor (2 months back from the
+   * real current month) — not whether `start` itself is the current month,
+   * since the default no longer puts the current month first. This is what
+   * disables the "today" control, so "already there" has to mean "already at
+   * the window `onToday` would produce," not "starts on today's month." */
   isCurrent: boolean;
   onPrev: () => void;
   onNext: () => void;

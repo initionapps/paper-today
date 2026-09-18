@@ -142,6 +142,11 @@ export const copy = {
     archive: "העבר לארכיון",
     delete: "מחק",
     undo: "בטל",
+    /** The project chip in `TaskMenu`, only for a task's *current* project
+     * once it's been archived — never for the general list of choices, which
+     * excludes archived projects entirely. Labels the one exception so it
+     * doesn't read as if the picker forgot to filter it out. */
+    archivedProjectChip: (name: string) => `${name} (בארכיון)`,
   },
 
   buckets: {

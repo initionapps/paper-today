@@ -4,7 +4,7 @@ import { useRef, useState } from "react";
 import { Archive, MoreHorizontal, Trash2 } from "lucide-react";
 
 import { Popover, PopoverItem, PopoverLabel } from "@/components/ui/popover";
-import { useDayStore } from "@/lib/store/day-store";
+import { activeProjects, useDayStore } from "@/lib/store/day-store";
 import { todayKey, tomorrowOf } from "@/lib/date";
 import { copy } from "@/lib/copy";
 import { cn } from "@/lib/cn";
@@ -20,13 +20,24 @@ export function TaskMenu({ task, className }: { task: Task; className?: string }
   // shared by both DateInputs: either one's native picker can be mid-use
   const dateFieldEngagedRef = useRef(false);
 
-  const projects = useDayStore((s) => s.projects);
+  const allProjects = useDayStore((s) => s.projects);
   const setTaskSize = useDayStore((s) => s.setTaskSize);
   const setTaskProject = useDayStore((s) => s.setTaskProject);
   const setPlannedDate = useDayStore((s) => s.setPlannedDate);
   const setDueDate = useDayStore((s) => s.setDueDate);
   const archiveTask = useDayStore((s) => s.archiveTask);
   const deleteTask = useDayStore((s) => s.deleteTask);
+
+  // The picker only ever offers active projects — an archived one is not
+  // somewhere a task should be newly filed. The one exception is a task that
+  // is *already* sitting in a project that's since been archived: dropping it
+  // from the list here would either silently reassign the task the next time
+  // anyone touched this menu, or make its current project unrenderable, so
+  // its current project is appended even when archived. It reads as an
+  // existing fact about this task, not a live choice — see its chip below.
+  const current = allProjects.find((p) => p.id === task.projectId);
+  const projects =
+    current?.archivedAt != null ? [...activeProjects(allProjects), current] : activeProjects(allProjects);
 
   const today = todayKey();
   const tomorrow = tomorrowOf(today);
@@ -124,7 +135,9 @@ export function TaskMenu({ task, className }: { task: Task; className?: string }
                   active={task.projectId === project.id}
                   onClick={() => setTaskProject(task.id, project.id)}
                 >
-                  {project.name}
+                  {project.archivedAt !== null
+                    ? copy.actions.archivedProjectChip(project.name)
+                    : project.name}
                 </Chip>
               ))}
             </div>

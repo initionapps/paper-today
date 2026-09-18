@@ -56,10 +56,19 @@ export function YearView() {
   const thisMonth = monthOf(today);
   const todayCell: MonthCell = { year: thisYear, month: thisMonth };
 
-  /** The first of the 12 months the matrix currently shows. Anchored on the
-   * current month by default — see the note in `YearHeader` for why this is
+  /** The window's default anchor: 2 months back, the current month, then 9
+   * forward. A pure current-month-first window was tried first and read as
+   * forward-only planning with no way to see what led into it — a goal you're
+   * mid-way through in, say, November needs September and October on screen
+   * to make sense of, not just the nine months still ahead. 2 back rather
+   * than more keeps the emphasis on what's ahead (9 of the 12 months), which
+   * is still the point of an annual *planning* view. */
+  const defaultWindowStart = shiftMonth(thisYear, thisMonth, -2);
+
+  /** The first of the 12 months the matrix currently shows. Anchored on
+   * `defaultWindowStart` — see the note in `YearHeader` for why this is
    * independent of `openMonth`. */
-  const [windowStart, setWindowStart] = useState<MonthCell>(todayCell);
+  const [windowStart, setWindowStart] = useState<MonthCell>(defaultWindowStart);
   /** `null` = no month has been opened; the phone still shows the current one. */
   const [openMonth, setOpenMonth] = useState<MonthCell | null>(null);
   /** Phones only: the matrix was asked for explicitly. */
@@ -97,17 +106,18 @@ export function YearView() {
 
   if (!hydrated) return <div className="min-h-[70vh]" />;
 
-  const isCurrentWindow = windowStart.year === thisYear && windowStart.month === thisMonth;
+  const isDefaultWindow =
+    windowStart.year === defaultWindowStart.year && windowStart.month === defaultWindowStart.month;
 
   return (
     <>
       <YearHeader
         start={windowStart}
         end={shiftMonth(windowStart.year, windowStart.month, 11)}
-        isCurrent={isCurrentWindow}
+        isCurrent={isDefaultWindow}
         onPrev={() => setWindowStart((w) => shiftMonth(w.year, w.month, -1))}
         onNext={() => setWindowStart((w) => shiftMonth(w.year, w.month, 1))}
-        onToday={() => setWindowStart(todayCell)}
+        onToday={() => setWindowStart(defaultWindowStart)}
       />
 
       {openMonth === null && (

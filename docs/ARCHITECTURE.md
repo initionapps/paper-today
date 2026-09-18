@@ -93,10 +93,20 @@ rather than implied.
 Before, the matrix always showed January–December of one year, which meant
 opening the view in November or December left almost nothing to plan forward
 into without switching years entirely. Now the window is anchored on whichever
-month is first (defaulting to the current month, with 11 months ahead of it —
-"היום" resets to that default), and shifts by one month at a time in either
-direction, so it can straddle a year boundary at any point, not just at its
-ends. The header shows the visible range instead of a bare year — `shortMonthName`
+month is first, and shifts by one month at a time in either direction, so it
+can straddle a year boundary at any point, not just at its ends.
+
+The default anchor is 2 months back from the current month, not the current
+month itself — the window is [current − 2 … current + 9]. A version that put
+the current month first was tried and shipped briefly; it read as forward-only
+planning with nothing behind it, and a goal you're mid-way through in, say,
+November needs September and October in view to make sense of, not just nine
+months of runway ahead. Two months of trailing context was enough to place a
+goal in progress without giving up most of the view's actual job, which is
+still looking ahead — 9 of the 12 months still are. "היום" resets to this same
+anchor, not to a current-month-first window; `YearHeader`'s `isCurrent` prop
+means "at the default anchor," which is why it's computed against
+`defaultWindowStart` rather than against today's own month. The header shows the visible range instead of a bare year — `shortMonthName`
 for each end plus both years when they differ, one year when the window
 happens to land on a single calendar one — and each month column carries its
 own (year, month) pair rather than assuming a shared year, so a KPI/focus cell
@@ -152,6 +162,18 @@ the comments on `windowStart` in `year-view.tsx` and on `YearHeader` itself.
 Today and All Tasks share every task component — the same inline rename, the
 same `TaskMenu`, the same metadata — so the two surfaces cannot drift apart.
 They live in `components/task/`; the two views only decide layout.
+
+`TaskMenu`'s project picker offers `activeProjects(...)` only — an archived
+project is somewhere a task's history can point, not somewhere a new
+assignment should go. The one exception is the task's *own current* project,
+appended even if it has since been archived, labeled with a `(בארכיון)` suffix
+so the chip still reads as a fact about this task rather than a live choice.
+Without it, opening the menu on such a task would either drop that project
+from view entirely (making the assignment unreadable in the one place it's
+edited) or reassign it the moment anyone touched the menu — silently losing
+data the task actually has. The chip is computed from the task's live
+`projectId`, not cached, so reassigning away from the archived project simply
+drops the chip on the next render, same as any other field.
 
 Nav is a row of soft pills above the column; the active one is a raised white
 surface and nothing more.
