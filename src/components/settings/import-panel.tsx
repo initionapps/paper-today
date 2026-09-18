@@ -314,6 +314,13 @@ function Summary({ data }: { data: LocalData }) {
     [copy.importPanel.workWindows, s.workWindows],
     [copy.importPanel.notes, s.notes],
     [copy.importPanel.dayLogs, s.dayLogs],
+    [copy.importPanel.monthlyFocus, s.monthlyFocus],
+    // Always 0 for a real import — goals postdate local storage entirely —
+    // but listed anyway so this table's own "every collection" claim stays
+    // literally true rather than true-with-an-asterisk.
+    [copy.importPanel.goals, s.goals],
+    [copy.importPanel.goalMonthlyFocus, s.goalMonthlyFocus],
+    [copy.importPanel.goalMonthlyKpi, s.goalMonthlyKpi],
   ];
 
   return (

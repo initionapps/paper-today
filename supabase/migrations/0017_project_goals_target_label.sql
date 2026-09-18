@@ -1,0 +1,16 @@
+-- 0017 — An optional free-text display form of a goal's KPI target.
+--
+-- `kpi_target` stays the only number anything measures against or ever will
+-- calculate from — this column is deliberately never parsed back into one.
+-- It exists because a bare number reads badly in the annual view: "יעד: 12000"
+-- says less than "יעד: 12,000 איש ברשימת תפוצה" or "יעד: Readiness 80", and
+-- there is no reliable way to derive either sentence from a number and a unit
+-- alone. So the sentence is simply typed once, stored as-is, and shown as-is;
+-- `kpi_target`/`kpi_unit` remain the fallback for a goal that has a KPI but
+-- no custom display text yet.
+--
+-- No CHECK constraint here, matching `kpi_unit`'s own precedent (`0012`): it
+-- is independently optional whether or not a KPI is otherwise defined, and
+-- nothing downstream treats an orphaned value as anything worse than unused
+-- text.
+alter table project_goals add column target_label text;

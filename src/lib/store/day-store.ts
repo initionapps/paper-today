@@ -31,10 +31,15 @@ import type {
   DateBucket,
   DayKey,
   DayLog,
+  GoalKpi,
+  GoalMonthlyFocus,
+  GoalMonthlyKpi,
+  MonthlyFocus,
   Note,
   NoteColor,
   PaletteColor,
   Project,
+  ProjectGoal,
   Routine,
   RoutineLog,
   Task,
@@ -43,6 +48,7 @@ import type {
   TimeBlock,
   WorkWindow,
 } from "@/lib/types";
+import { MAX_FOCUS_ITEMS, MAX_GOALS } from "@/lib/types";
 
 /**
  * Ids are real uuids now, because the columns they land in are `uuid`.
@@ -61,7 +67,7 @@ const DEFAULT_MOTTO = "לעשות פחות, ולעשות את זה כמו שצר
  * carry it, and a browser that has not been imported yet still holds a v6 blob
  * under `paper-today/day`. `migratePersisted` below is what reads both.
  */
-export const STORE_VERSION = 6;
+export const STORE_VERSION = 11;
 
 /**
  * Everything that survives a reload — and nothing that doesn't. Transient UI
@@ -81,6 +87,10 @@ export interface PersistedSlice {
   workWindows: WorkWindow[];
   notes: Note[];
   dayLogs: DayLog[];
+  monthlyFocus: MonthlyFocus[];
+  goals: ProjectGoal[];
+  goalMonthlyFocus: GoalMonthlyFocus[];
+  goalMonthlyKpi: GoalMonthlyKpi[];
 }
 
 // generic so that passing it straight to `partialize` doesn't narrow the whole
@@ -96,6 +106,10 @@ export function persistedSlice<T extends PersistedSlice>(s: T): PersistedSlice {
     workWindows: s.workWindows,
     notes: s.notes,
     dayLogs: s.dayLogs,
+    monthlyFocus: s.monthlyFocus,
+    goals: s.goals,
+    goalMonthlyFocus: s.goalMonthlyFocus,
+    goalMonthlyKpi: s.goalMonthlyKpi,
   };
 }
 
@@ -129,6 +143,10 @@ interface DayState {
   workWindows: WorkWindow[];
   notes: Note[];
   dayLogs: DayLog[];
+  monthlyFocus: MonthlyFocus[];
+  goals: ProjectGoal[];
+  goalMonthlyFocus: GoalMonthlyFocus[];
+  goalMonthlyKpi: GoalMonthlyKpi[];
 
   /** Transient — never persisted. */
   undo: UndoEntry | null;
@@ -225,6 +243,81 @@ interface DayState {
   liftNote: (id: string) => void;
   deleteNote: (id: string) => void;
 
+  /**
+   * Rewrites one project-month cell wholesale.
+   *
+   * Takes the whole list rather than add/edit/remove/reorder actions: all four
+   * are "the cell now reads this", the array carries its own order, and one
+   * entry point means one keyed write that a burst of typing collapses into.
+   *
+   * Blank entries are dropped and the rest trimmed, so the caller can hand over
+   * a draft with a half-typed third line. An empty result deletes the row —
+   * there is no stored empty cell.
+   */
+  setMonthlyFocus: (projectId: string, year: number, month: number, items: string[]) => void;
+
+  /**
+   * Up to `MAX_GOALS` short directions inside a project. Adding a sixth is
+   * silently refused client-side — the database refuses it too, via a
+   * trigger, since "at most N siblings" can't be a CHECK or a UNIQUE
+   * constraint. Returns the new goal's id, or `""` if the cap or a blank
+   * title stopped it — mirrors `addProject`'s "return an id either way"
+   * shape so a composer never has to branch on failure.
+   */
+  addGoal: (projectId: string, title: string) => string;
+  updateGoal: (id: string, title: string) => void;
+  /**
+   * Deletes the goal **and** its goal-owned monthly focus, then registers one
+   * undo that restores both together. Never silent, never a permanent orphan
+   * bin — the same one-shot-undo shape every other delete in this store uses.
+   * Project-level `monthly_focus` for the same project is untouched; the two
+   * tables don't know about each other.
+   */
+  deleteGoal: (id: string) => void;
+  /** Plain integer positions, rewritten in full — see `0009`'s note on why a
+   * five-item list doesn't want the fractional `orderBetween` scheme. */
+  reorderGoals: (projectId: string, ids: string[]) => void;
+  /**
+   * Sets or clears a goal's one optional KPI *definition* — the whole thing,
+   * every time, same "set-the-whole-value" contract as `setMonthlyFocus`, not
+   * a partial patch. `kpi: null` clears the definition only — it deliberately
+   * does **not** touch any `goalMonthlyKpi` rows already recorded. Real
+   * measurements someone entered are not "a definition-less KPI value means
+   * nothing" the way an empty draft would be; they're history, and this app's
+   * standing rule is to never silently delete or reassign data the user
+   * entered (see the Goals feature's own legacy-focus handling for the same
+   * principle). A cleared goal simply stops *showing* its KPI anywhere until
+   * a definition exists again — re-adding one with the same shape brings the
+   * old months straight back, since they were never gone. No-ops (leaves the
+   * goal untouched) on a blank label or a target that isn't greater than
+   * zero, mirroring `0012`'s CHECK constraint client-side, the same way
+   * `MAX_GOALS` is mirrored for the count. No undo: re-entering a few small
+   * fields is cheap enough not to need one, and nothing is actually lost by
+   * clearing it in the first place.
+   */
+  setGoalKpi: (id: string, kpi: GoalKpi | null) => void;
+
+  /** `GoalMonthlyFocus`'s version of `setMonthlyFocus` — same shape, same
+   * "the whole cell, every time" contract, one layer deeper. */
+  setGoalMonthlyFocus: (goalId: string, year: number, month: number, items: string[]) => void;
+  /**
+   * One month's actual measurement toward a goal's KPI. `value: null` deletes
+   * the row — no measurement that month, not a stored zero (a real `0` is a
+   * legitimate value and is kept). No-ops if the goal has no KPI definition
+   * at all: a measurement with nothing to measure against isn't a thing the
+   * UI can produce, so this refuses to create one even if called directly.
+   */
+  setGoalMonthlyKpi: (goalId: string, year: number, month: number, value: number | null) => void;
+  /**
+   * The one deliberate cross-table move: a project-level cell's items become
+   * a goal's cell for the same month, and the project-level row is deleted.
+   * Refuses — returns `false`, changes nothing — if the destination already
+   * has content, rather than merging or silently dropping the overflow. This
+   * is the only path that ever touches "legacy" project-level focus once a
+   * project has goals; nothing does it automatically.
+   */
+  moveMonthlyFocusToGoal: (projectId: string, goalId: string, year: number, month: number) => boolean;
+
   setMotto: (motto: string) => void;
 
   /** Restore from a backup: one write, all of it or none of it. */
@@ -261,6 +354,10 @@ function emptyState(): PersistedSlice {
     workWindows: [],
     notes: [],
     dayLogs: [],
+    monthlyFocus: [],
+    goals: [],
+    goalMonthlyFocus: [],
+    goalMonthlyKpi: [],
   };
 }
 
@@ -325,6 +422,36 @@ export const useDayStore = create<DayState>()((set, get) => {
       const row = get().dayLogs.find((l) => l.day === day);
       if (row) await repo.saveDayLog(row);
     }, `day-log:${day}`);
+
+  const saveMonthlyFocus = (projectId: string, year: number, month: number) =>
+    write("save monthly focus", async () => {
+      const row = get().monthlyFocus.find(
+        (f) => f.projectId === projectId && f.year === year && f.month === month,
+      );
+      if (row) await repo.saveMonthlyFocus(row);
+    }, `focus:${projectId}:${year}:${month}`);
+
+  const saveGoal = (id: string) =>
+    write("save goal", async () => {
+      const row = get().goals.find((g) => g.id === id);
+      if (row) await repo.saveGoal(row);
+    }, `goal:${id}`);
+
+  const saveGoalMonthlyFocus = (goalId: string, year: number, month: number) =>
+    write("save goal focus", async () => {
+      const row = get().goalMonthlyFocus.find(
+        (f) => f.goalId === goalId && f.year === year && f.month === month,
+      );
+      if (row) await repo.saveGoalMonthlyFocus(row);
+    }, `goal-focus:${goalId}:${year}:${month}`);
+
+  const saveGoalMonthlyKpi = (goalId: string, year: number, month: number) =>
+    write("save goal kpi value", async () => {
+      const row = get().goalMonthlyKpi.find(
+        (f) => f.goalId === goalId && f.year === year && f.month === month,
+      );
+      if (row) await repo.saveGoalMonthlyKpi(row);
+    }, `goal-kpi:${goalId}:${year}:${month}`);
 
   /** Patch one task by id, then persist it. */
   const patchTask = (id: string, patch: Partial<Task>) => {
@@ -814,6 +941,230 @@ export const useDayStore = create<DayState>()((set, get) => {
         });
     },
 
+    setMonthlyFocus: (projectId, year, month, items) => {
+      const cleaned = items
+        .map((i) => i.trim())
+        .filter(Boolean)
+        .slice(0, MAX_FOCUS_ITEMS);
+
+      const matches = (f: MonthlyFocus) =>
+        f.projectId === projectId && f.year === year && f.month === month;
+      const existing = get().monthlyFocus.find(matches);
+
+      // Nothing left in the cell: the row goes. Ordering matters — the delete
+      // is queued *after* any save still sitting in front of it, so the queue
+      // ends on the delete rather than resurrecting the row behind it.
+      if (cleaned.length === 0) {
+        if (!existing) return;
+        set((s) => ({ monthlyFocus: s.monthlyFocus.filter((f) => !matches(f)) }));
+        write(
+          "delete monthly focus",
+          () => repo.deleteMonthlyFocus(projectId, year, month),
+          `focus-delete:${projectId}:${year}:${month}`,
+        );
+        return;
+      }
+
+      // Unchanged cells are common — the editor commits on blur whether or not
+      // anything was typed, and a no-op write would still cost a round trip.
+      if (
+        existing &&
+        existing.items.length === cleaned.length &&
+        existing.items.every((item, i) => item === cleaned[i])
+      ) {
+        return;
+      }
+
+      set((s) => ({
+        monthlyFocus: existing
+          ? s.monthlyFocus.map((f) => (matches(f) ? { ...f, items: cleaned } : f))
+          : [...s.monthlyFocus, { projectId, year, month, items: cleaned }],
+      }));
+      saveMonthlyFocus(projectId, year, month);
+    },
+
+    addGoal: (projectId, title) => {
+      const trimmed = title.trim();
+      const id = uid();
+      if (!trimmed) return "";
+      const mine = get().goals.filter((g) => g.projectId === projectId);
+      if (mine.length >= MAX_GOALS) return "";
+      set((s) => ({
+        goals: [...s.goals, { id, projectId, title: trimmed, order: mine.length, kpi: null }],
+      }));
+      saveGoal(id);
+      return id;
+    },
+
+    updateGoal: (id, title) => {
+      const trimmed = title.trim();
+      if (!trimmed) return;
+      set((s) => ({ goals: s.goals.map((g) => (g.id === id ? { ...g, title: trimmed } : g)) }));
+      saveGoal(id);
+    },
+
+    deleteGoal: (id) => {
+      const goal = get().goals.find((g) => g.id === id);
+      if (!goal) return;
+      // Captured before the delete, so undo has exactly what to put back —
+      // the same shape `deleteNote` already uses for a single row, just
+      // carrying the goal's focus and KPI history along with it.
+      const focus = get().goalMonthlyFocus.filter((f) => f.goalId === id);
+      const kpiValues = get().goalMonthlyKpi.filter((f) => f.goalId === id);
+
+      set((s) => ({
+        goals: s.goals.filter((g) => g.id !== id),
+        goalMonthlyFocus: s.goalMonthlyFocus.filter((f) => f.goalId !== id),
+        goalMonthlyKpi: s.goalMonthlyKpi.filter((f) => f.goalId !== id),
+      }));
+      // One delete reaches the database — the FK cascade takes the goal's
+      // focus rows and KPI values with it server-side, so there is nothing
+      // else to queue.
+      write("delete goal", () => repo.deleteGoal(id), `goal-delete:${id}`);
+
+      remember(copy.undo.goalDeleted(goal.title), () => {
+        set((s) => ({
+          goals: [...s.goals, goal],
+          goalMonthlyFocus: [...s.goalMonthlyFocus, ...focus],
+          goalMonthlyKpi: [...s.goalMonthlyKpi, ...kpiValues],
+        }));
+        saveGoal(id);
+        for (const f of focus) saveGoalMonthlyFocus(f.goalId, f.year, f.month);
+        for (const v of kpiValues) saveGoalMonthlyKpi(v.goalId, v.year, v.month);
+      });
+    },
+
+    reorderGoals: (projectId, ids) => {
+      set((s) => ({
+        goals: s.goals.map((g) => {
+          if (g.projectId !== projectId) return g;
+          const index = ids.indexOf(g.id);
+          return index === -1 ? g : { ...g, order: index };
+        }),
+      }));
+      for (const id of ids) saveGoal(id);
+    },
+
+    setGoalKpi: (id, kpi) => {
+      if (kpi) {
+        const label = kpi.label.trim();
+        if (!label || !(kpi.target > 0)) return;
+        kpi = {
+          label,
+          target: kpi.target,
+          unit: kpi.unit?.trim() || null,
+          targetLabel: kpi.targetLabel?.trim() || null,
+        };
+      }
+      set((s) => ({ goals: s.goals.map((g) => (g.id === id ? { ...g, kpi } : g)) }));
+      saveGoal(id);
+    },
+
+    setGoalMonthlyFocus: (goalId, year, month, items) => {
+      const cleaned = items
+        .map((i) => i.trim())
+        .filter(Boolean)
+        .slice(0, MAX_FOCUS_ITEMS);
+
+      const matches = (f: GoalMonthlyFocus) =>
+        f.goalId === goalId && f.year === year && f.month === month;
+      const existing = get().goalMonthlyFocus.find(matches);
+
+      if (cleaned.length === 0) {
+        if (!existing) return;
+        set((s) => ({ goalMonthlyFocus: s.goalMonthlyFocus.filter((f) => !matches(f)) }));
+        write(
+          "delete goal focus",
+          () => repo.deleteGoalMonthlyFocus(goalId, year, month),
+          `goal-focus-delete:${goalId}:${year}:${month}`,
+        );
+        return;
+      }
+
+      if (
+        existing &&
+        existing.items.length === cleaned.length &&
+        existing.items.every((item, i) => item === cleaned[i])
+      ) {
+        return;
+      }
+
+      const goal = get().goals.find((g) => g.id === goalId);
+      set((s) => ({
+        goalMonthlyFocus: existing
+          ? s.goalMonthlyFocus.map((f) => (matches(f) ? { ...f, items: cleaned } : f))
+          : [
+              ...s.goalMonthlyFocus,
+              // `projectId` is carried for the database's ownership check —
+              // if the goal has since vanished from this in-memory copy there
+              // is nothing sound to write, so the call is dropped rather than
+              // sent with a guessed project.
+              ...(goal ? [{ goalId, projectId: goal.projectId, year, month, items: cleaned }] : []),
+            ],
+      }));
+      if (existing || goal) saveGoalMonthlyFocus(goalId, year, month);
+    },
+
+    setGoalMonthlyKpi: (goalId, year, month, value) => {
+      const matches = (f: GoalMonthlyKpi) =>
+        f.goalId === goalId && f.year === year && f.month === month;
+      const existing = get().goalMonthlyKpi.find(matches);
+
+      if (value === null) {
+        if (!existing) return;
+        set((s) => ({ goalMonthlyKpi: s.goalMonthlyKpi.filter((f) => !matches(f)) }));
+        write(
+          "delete goal kpi value",
+          () => repo.deleteGoalMonthlyKpi(goalId, year, month),
+          `goal-kpi-delete:${goalId}:${year}:${month}`,
+        );
+        return;
+      }
+      if (!Number.isFinite(value) || value < 0) return;
+      if (existing && existing.value === value) return;
+
+      // A measurement with no KPI to measure against isn't a state the UI
+      // can produce — see the note on this action in `DayState`.
+      const goal = get().goals.find((g) => g.id === goalId);
+      if (!goal?.kpi) return;
+
+      set((s) => ({
+        goalMonthlyKpi: existing
+          ? s.goalMonthlyKpi.map((f) => (matches(f) ? { ...f, value } : f))
+          : [...s.goalMonthlyKpi, { goalId, projectId: goal.projectId, year, month, value }],
+      }));
+      saveGoalMonthlyKpi(goalId, year, month);
+    },
+
+    moveMonthlyFocusToGoal: (projectId, goalId, year, month) => {
+      const source = get().monthlyFocus.find(
+        (f) => f.projectId === projectId && f.year === year && f.month === month,
+      );
+      if (!source) return false;
+
+      // Never merged, never truncated: a destination that already holds
+      // anything stops the move outright rather than guessing how to combine
+      // the two. A goal-focus row only ever exists with 1–3 real items in it
+      // (see `GoalMonthlyFocus`), so "the row exists" already means "there is
+      // content there."
+      const occupied = get().goalMonthlyFocus.some(
+        (f) => f.goalId === goalId && f.year === year && f.month === month,
+      );
+      if (occupied) return false;
+
+      set((s) => ({
+        monthlyFocus: s.monthlyFocus.filter((f) => f !== source),
+        goalMonthlyFocus: [...s.goalMonthlyFocus, { goalId, projectId, year, month, items: source.items }],
+      }));
+      write(
+        "delete monthly focus",
+        () => repo.deleteMonthlyFocus(projectId, year, month),
+        `focus-delete:${projectId}:${year}:${month}`,
+      );
+      saveGoalMonthlyFocus(goalId, year, month);
+      return true;
+    },
+
     setMotto: (motto) => {
       const trimmed = motto.trim();
       set({ motto: trimmed });
@@ -942,6 +1293,10 @@ interface PersistedData {
   workWindows?: WorkWindow[];
   notes: Note[];
   dayLogs: DayLog[];
+  monthlyFocus?: MonthlyFocus[];
+  goals?: ProjectGoal[];
+  goalMonthlyFocus?: GoalMonthlyFocus[];
+  goalMonthlyKpi?: GoalMonthlyKpi[];
 }
 
 const endFromDuration = (start: number | null, duration?: number | null) =>
@@ -1043,6 +1398,79 @@ function toV6(data: PersistedData): PersistedData {
   };
 }
 
+/**
+ * v6 → v7: the annual map appears. Purely additive and defaulted to empty — no
+ * field is renamed or reinterpreted, so nothing already saved can break. A
+ * backup written before this simply has no focus data, which is the same thing
+ * as having none.
+ */
+function toV7(data: PersistedData): PersistedData {
+  return { ...data, monthlyFocus: data.monthlyFocus ?? [] };
+}
+
+/**
+ * v7 → v8: project goals appear, and monthly focus can belong to one instead
+ * of directly to a project. Purely additive and defaulted to empty, same as
+ * `toV7` — a backup written before goals existed simply has none, and every
+ * one of its `monthlyFocus` rows is still exactly what it was: project-level.
+ */
+function toV8(data: PersistedData): PersistedData {
+  return { ...data, goals: data.goals ?? [], goalMonthlyFocus: data.goalMonthlyFocus ?? [] };
+}
+
+/**
+ * v8 → v9: each goal gains an optional KPI. Purely additive and defaulted to
+ * `null` — a goal saved before the KPI feature existed simply has none, same
+ * shape as every other version step here.
+ */
+function toV9(data: PersistedData): PersistedData {
+  return { ...data, goals: (data.goals ?? []).map((g) => ({ ...g, kpi: g.kpi ?? null })) };
+}
+
+/**
+ * v9 → v10: a goal's KPI splits into a fixed definition (`label`, `target`,
+ * `unit`) and separate monthly measurements — `current` no longer lives on
+ * the goal. Carrying forward an existing `current` as a lost number would be
+ * exactly the "silently discard data" this app avoids everywhere else, so it
+ * becomes one `goalMonthlyKpi` row instead, dated to whichever month this
+ * migration happens to run in — the identical choice `0015` makes on the
+ * server for the same reason, at the same granularity: "now" is the best
+ * available answer, since the old model never recorded a real one.
+ */
+function toV10(data: PersistedData): PersistedData {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth() + 1;
+  const carried: GoalMonthlyKpi[] = [];
+
+  const goals = (data.goals ?? []).map((g) => {
+    const kpi = g.kpi as (GoalKpi & { current?: number }) | null;
+    if (kpi && typeof kpi.current === "number") {
+      carried.push({ goalId: g.id, projectId: g.projectId, year, month, value: kpi.current });
+      return { ...g, kpi: { label: kpi.label, target: kpi.target, unit: kpi.unit, targetLabel: null } };
+    }
+    return g;
+  });
+
+  return { ...data, goals, goalMonthlyKpi: [...(data.goalMonthlyKpi ?? []), ...carried] };
+}
+
+/**
+ * v10 → v11: a goal's KPI gains `targetLabel`, an optional free-text display
+ * sentence separate from the numeric `target` — see `0017` and `kpiTargetText`.
+ * Purely additive and defaulted to `null`: a KPI saved before this existed
+ * simply has none, and falls back to the numeric target + unit wherever it's
+ * shown, exactly as if it had always been `null`.
+ */
+function toV11(data: PersistedData): PersistedData {
+  return {
+    ...data,
+    goals: (data.goals ?? []).map((g) =>
+      g.kpi ? { ...g, kpi: { ...g.kpi, targetLabel: g.kpi.targetLabel ?? null } } : g,
+    ),
+  };
+}
+
 export function migratePersisted(persisted: unknown, version: number): PersistedData {
   let data = persisted as PersistedData;
   if (version < 2) data = toV2(data);
@@ -1050,6 +1478,11 @@ export function migratePersisted(persisted: unknown, version: number): Persisted
   if (version < 4) data = toV4(data);
   if (version < 5) data = toV5(data);
   if (version < 6) data = toV6(data);
+  if (version < 7) data = toV7(data);
+  if (version < 8) data = toV8(data);
+  if (version < 9) data = toV9(data);
+  if (version < 10) data = toV10(data);
+  if (version < 11) data = toV11(data);
   return data;
 }
 
@@ -1179,4 +1612,116 @@ export function routineLogFor(
   day: DayKey,
 ): RoutineLog | undefined {
   return logs.find((l) => l.routineId === routineId && l.day === day);
+}
+
+// ---------------------------------------------------------- annual selectors
+
+/**
+ * One cell. `undefined` rather than an empty row, because "no focus set" and
+ * "a focus cell holding nothing" are the same state and only one of them is
+ * representable — see `MonthlyFocus`.
+ */
+export function focusFor(
+  focus: MonthlyFocus[],
+  projectId: string,
+  year: number,
+  month: number,
+): MonthlyFocus | undefined {
+  return focus.find((f) => f.projectId === projectId && f.year === year && f.month === month);
+}
+
+/** Just the text of one cell, ready to render or edit. Empty when unset. */
+export function focusItems(
+  focus: MonthlyFocus[],
+  projectId: string,
+  year: number,
+  month: number,
+): string[] {
+  return focusFor(focus, projectId, year, month)?.items ?? [];
+}
+
+/**
+ * Years that actually hold something, plus the current one, ascending.
+ *
+ * The year control does not need to stop at these — you can always page into
+ * an empty year — but knowing which years have content is what lets the UI say
+ * so rather than making you hunt.
+ */
+export function yearsWithFocus(focus: MonthlyFocus[], currentYear: number): number[] {
+  return [...new Set([currentYear, ...focus.map((f) => f.year)])].sort((a, b) => a - b);
+}
+
+// ------------------------------------------------------------ project goals
+
+/** A project's goals, in the plain integer order they're stored in. */
+export function goalsForProject(goals: ProjectGoal[], projectId: string): ProjectGoal[] {
+  return goals.filter((g) => g.projectId === projectId).sort((a, b) => a.order - b.order);
+}
+
+/**
+ * The annual-view branch, in one place: a project with any goals shows one
+ * row per goal and becomes a group label, a project with none shows its own
+ * single row exactly as it always has. Called from both the matrix and the
+ * month panel so the two surfaces can never disagree about which mode a
+ * project is in.
+ */
+export function projectHasGoals(goals: ProjectGoal[], projectId: string): boolean {
+  return goals.some((g) => g.projectId === projectId);
+}
+
+export function goalFocusFor(
+  focus: GoalMonthlyFocus[],
+  goalId: string,
+  year: number,
+  month: number,
+): GoalMonthlyFocus | undefined {
+  return focus.find((f) => f.goalId === goalId && f.year === year && f.month === month);
+}
+
+export function goalFocusItems(
+  focus: GoalMonthlyFocus[],
+  goalId: string,
+  year: number,
+  month: number,
+): string[] {
+  return goalFocusFor(focus, goalId, year, month)?.items ?? [];
+}
+
+/**
+ * One month's measurement toward a goal's KPI, keyed by the real calendar
+ * (year, month) — not a "display year," so a rolling window spanning two
+ * calendar years reads the correct value on either side of the boundary the
+ * same way `goalFocusFor` already does for focus items.
+ */
+export function goalMonthlyKpiFor(
+  values: GoalMonthlyKpi[],
+  goalId: string,
+  year: number,
+  month: number,
+): GoalMonthlyKpi | undefined {
+  return values.find((f) => f.goalId === goalId && f.year === year && f.month === month);
+}
+
+/** Just the number, ready to render or edit. `null` when that month has no
+ * measurement — never `0`, since a real zero is a legitimate value. */
+export function goalMonthlyKpiValue(
+  values: GoalMonthlyKpi[],
+  goalId: string,
+  year: number,
+  month: number,
+): number | null {
+  return goalMonthlyKpiFor(values, goalId, year, month)?.value ?? null;
+}
+
+/**
+ * Project-level focus that predates the project's goals — the exact
+ * "surface it, let me move it or delete it" case from the Project screen.
+ * Once a project has goals this is the only place its `monthly_focus` rows
+ * are still reachable at all; the annual view stops showing the project's own
+ * row the moment it has even one goal.
+ */
+export function legacyFocusForProject(focus: MonthlyFocus[], projectId: string): MonthlyFocus[] {
+  return focus
+    .filter((f) => f.projectId === projectId)
+    .sort((a, b) => a.year - b.year || a.month - b.month);
 }

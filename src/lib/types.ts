@@ -52,6 +52,106 @@ export interface Project {
   archivedAt: string | null;
 }
 
+/**
+ * A short named direction inside a project — the layer the annual view hangs
+ * monthly focus on when a project is big enough to want one. MVP-deliberately
+ * thin: a title, a position, and at most one optional KPI *definition*. No
+ * status, no due date, no progress beyond that one KPI — those stay
+ * explicitly out of scope. The KPI's actual month-by-month numbers live
+ * separately, in `GoalMonthlyKpi` — see the note there for why.
+ *
+ * `order` is a plain integer (0-based), not the fractional `sort_order` every
+ * other list here uses. A goal list is capped at five, so rewriting every
+ * position on a reorder costs nothing, and a float earns its keep only on
+ * lists large or busy enough that rewriting the whole thing would not — see
+ * `0009_project_goals.sql`.
+ */
+export interface ProjectGoal {
+  id: string;
+  projectId: string;
+  title: string;
+  order: number;
+  /**
+   * At most one simple measurable indicator's *definition*, or none. `null`,
+   * not an optional key — the same "nullable field, not optional field"
+   * convention as `archivedAt`. See `GoalKpi` and `0012_project_goals_kpi.sql`.
+   */
+  kpi: GoalKpi | null;
+}
+
+/**
+ * A KPI's fixed definition — deliberately thin: a label, where it's headed,
+ * and an optional unit. No history, no formula, no second KPI, no status
+ * colour. What NOT to look for here: a "current" value. That used to live on
+ * this type (`0012`) and was wrong — a KPI is meant to show progress *across
+ * months*, and a single number on the goal can only ever hold the latest one,
+ * overwriting history on every edit. Each month's actual measurement is a
+ * `GoalMonthlyKpi` row instead, exactly the same move `MonthlyFocus` already
+ * made relative to a project. See `0014`–`0015` for the migration.
+ *
+ * `target` is a plain number rather than an integer because "24,000 ₪ /
+ * month" and "2.5" are both legitimate values; the database enforces
+ * `target > 0` (`0012`), and this type mirrors that rather than re-deriving
+ * it. Both `label` and `target` are required together — a goal either has a
+ * complete KPI definition or `kpi: null`, never a half-filled one. `unit`
+ * stays independently optional: "3 workouts a week" is a complete KPI
+ * without one.
+ *
+ * `targetLabel` (`0017`) is a separate, optional, free-text *sentence* for
+ * display — "12,000 איש ברשימת תפוצה", "Readiness 80", "3 אימונים בשבוע".
+ * `target` remains the only number anything measures against or ever
+ * calculates from; `targetLabel` is never parsed back into one. See
+ * `kpiTargetText` for how the two combine when something needs one line of
+ * text to show.
+ */
+export interface GoalKpi {
+  label: string;
+  target: number;
+  unit: string | null;
+  targetLabel: string | null;
+}
+
+/**
+ * The one line of text to show for a goal's KPI target, wherever a sentence
+ * rather than a bare number is needed — `targetLabel` if the goal has one,
+ * otherwise a plain fallback built from the numeric `target` and `unit`.
+ * Shared by the annual matrix's goal-column line and the Project screen's
+ * own summary, so the two can never show two different resolutions of the
+ * same goal's target.
+ */
+export function kpiTargetText(kpi: GoalKpi): string {
+  const label = kpi.targetLabel?.trim();
+  if (label) return label;
+  const target = kpi.target.toLocaleString("en-US", { maximumFractionDigits: 2 });
+  return kpi.unit ? `${target} ${kpi.unit}` : target;
+}
+
+/**
+ * One month's actual measurement toward a goal's KPI — `GoalMonthlyFocus`'s
+ * sibling, one more time, for the identical reason: a goal's KPI can have at
+ * most one number per calendar month, keyed by `(goalId, year, month)`, with
+ * no `id` of its own for the same reason `MonthlyFocus`/`GoalMonthlyFocus`
+ * have none — the natural key already answers "which row is this."
+ *
+ * No row for a month means no measurement that month, not a zero — a real
+ * zero is `value: 0` and is a perfectly legitimate measurement (a KPI can
+ * start there). Gaps are expected and normal: the annual matrix simply shows
+ * nothing in a month nobody measured, exactly like an empty focus cell.
+ */
+export interface GoalMonthlyKpi {
+  goalId: string;
+  projectId: string;
+  year: number;
+  /** 1 = January … 12 = December. */
+  month: number;
+  value: number;
+}
+
+/** The cap, in one place. The database enforces it too (a trigger, since a
+ * per-sibling-group row count can't be expressed as a CHECK) — this is what
+ * stops the UI offering a sixth box, not what makes the rule true. */
+export const MAX_GOALS = 5;
+
 export interface Task {
   id: string;
   title: string;
@@ -198,6 +298,61 @@ export interface WorkWindow {
   startMin: number;
   endMin: number;
 }
+
+/**
+ * Up to three things that matter for one project in one month — the annual map.
+ *
+ * Structurally **not** a task, and deliberately so: no status, no completion, no
+ * due date, no size, no assignee, no percentage. Nothing here is ever
+ * materialised into `tasks`, and All Tasks never reads it. It answers "what is
+ * this project actually about in March", which is a different question from
+ * "what do I do today".
+ *
+ * No `id`. The natural key is (projectId, year, month) and that is what the
+ * row is upserted on — the same shape as `DayLog`, where the day *is* the
+ * identity and the row's uuid is an implementation detail the domain never
+ * sees. One cell, one row.
+ *
+ * `items` is ordered and holds 1–3 entries, **never 0**: a month with nothing
+ * in it has no row at all, exactly as an untouched routine has no `RoutineLog`.
+ * Removing the last item deletes the row rather than storing an empty array.
+ */
+export interface MonthlyFocus {
+  projectId: string;
+  year: number;
+  /** 1 = January … 12 = December. */
+  month: number;
+  items: string[];
+}
+
+/**
+ * `MonthlyFocus`'s sibling, not a variant of it — owned by a goal instead of
+ * directly by a project. A project's monthly focus lives in one table or the
+ * other, never both at once in the UI's intent, though the database has no
+ * trouble holding rows in each simultaneously (see `0010`'s note on why this
+ * is two tables and not one column added to the first).
+ *
+ * Also no `id`, for the same reason: the natural key here is `(goalId, year,
+ * month)` — a goal id is globally unique, so `projectId` doesn't need to be
+ * part of the key to make it correct, only carried alongside it so the
+ * database can enforce that the goal actually belongs to that project.
+ */
+export interface GoalMonthlyFocus {
+  goalId: string;
+  projectId: string;
+  year: number;
+  month: number;
+  items: string[];
+}
+
+/**
+ * The cap, in one place. The database enforces it too
+ * (`monthly_focus_items_bounded` / `goal_monthly_focus_items_bounded`) — this
+ * is what stops the UI offering a fourth box in the first place, not what
+ * makes the rule true. Shared by both `MonthlyFocus` and `GoalMonthlyFocus`:
+ * the cap is a fact about a "focus cell," not about which table it lives in.
+ */
+export const MAX_FOCUS_ITEMS = 3;
 
 /** Where a task lands in All Tasks, derived from plannedDate against today. */
 export type DateBucket = "overdue" | "today" | "tomorrow" | "upcoming" | "none";

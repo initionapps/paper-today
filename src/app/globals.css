@@ -50,7 +50,7 @@
    * the reason amber is — if a project could be gold, gold would stop meaning
    * "big".
    *
-   * Three values, each doing one job:
+   * Four values, each doing one job:
    *   gold        the accent itself. Only ever used at partial opacity, for the
    *               hover border. Never a fill — at full strength it is jewellery.
    *   gold-line   the hairline frame. L≈71% against a 91% neutral border, so it
@@ -58,10 +58,18 @@
    *               hairline up close.
    *   gold-soft   the tint. 97% lightness — a cream you notice only next to the
    *               white Medium cards, which is the only place it has to work.
+   *   gold-deep   body text. `gold` itself fails contrast on white outright
+   *               (~2.6:1) — it was never meant to hold text, only an accent
+   *               or a hover line. A goal's KPI target reads as a sentence in
+   *               the annual view, not an accent, so it needed its own darker
+   *               value: ~5.5:1 against white, comfortably past WCAG AA for
+   *               normal-size text, while staying the same warm hue as the
+   *               other three so it still reads as "the KPI colour."
    */
   --color-gold: #c9a227;
   --color-gold-line: #ddc78e;
   --color-gold-soft: #fdfaf1;
+  --color-gold-deep: #8a6d1f;
 
   /* The Schedule's availability ladder. Each rung is a clearly visible step
    * down in brightness, so "can I work then?" is answered by lightness alone:
@@ -184,6 +192,31 @@ body {
 .ltr-run {
   direction: ltr;
   unicode-bidi: isolate;
+}
+
+/* Scrolls, without a scrollbar drawn for it. Only the bar is hidden — wheel,
+ * trackpad, touch, keyboard and programmatic scrolling all behave exactly as
+ * they did, so this is presentation and never a change to what the element
+ * can do. Always paired with a real `overflow` on the element itself; on its
+ * own it does nothing.
+ *
+ * Three declarations because no single one covers the field: `scrollbar-width`
+ * is the standard property and is what Firefox reads, `::-webkit-scrollbar` is
+ * the non-standard pseudo-element Chrome, Edge and Safari still use, and
+ * `-ms-overflow-style` covers pre-Chromium Edge. They are additive, not
+ * fallbacks for each other.
+ *
+ * Only for a surface whose scrolling is already obvious from something else —
+ * the annual matrix is scrolled with the month arrows beside its own header,
+ * and columns cut off at the edge say plainly that there is more. Do not
+ * reach for it to tidy up a scroller whose only hint that it scrolls was the
+ * bar. */
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }
 
 /* ------------------------------------------------------------------ depth

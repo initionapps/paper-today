@@ -6,7 +6,7 @@ export default async function SchedulePage() {
   await requireUser();
 
   return (
-    <AppShell wide>
+    <AppShell width="wide">
       <ScheduleView />
     </AppShell>
   );

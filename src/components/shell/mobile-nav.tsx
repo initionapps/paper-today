@@ -32,8 +32,16 @@ const DESTINATIONS = [
   { href: "/projects", label: copy.mobileNav.projects, Icon: FolderKanban },
 ];
 
-/** Routes that live behind `עוד` rather than in the bar. */
-const MORE_ROUTES = ["/settings"];
+/**
+ * Routes that live behind `עוד` rather than in the bar.
+ *
+ * `/year` is here rather than in a sixth slot: the comment above puts the bar's
+ * legible limit at five on a 360px screen, and the annual view is somewhere you
+ * go to plan occasionally, not one of the four you flip between during a day.
+ * It also has a second way in — the monthly view links to the matrix — so the
+ * sheet is not its only door.
+ */
+const MORE_ROUTES = ["/year", "/settings"];
 
 const matches = (path: string, href: string) => path === href || path.startsWith(`${href}/`);
 
@@ -154,18 +162,24 @@ function MoreSheet({ onClose, pathname }: { onClose: () => void; pathname: strin
           </button>
         </div>
 
-        <Link
-          href="/settings"
-          prefetch={true}
-          onNavigate={onClose}
-          aria-current={matches(pathname, "/settings") ? "page" : undefined}
-          className={cn(
-            "flex min-h-[52px] items-center px-4 text-[15px] transition-colors",
-            matches(pathname, "/settings") ? "font-medium text-blue" : "text-text",
-          )}
-        >
-          {copy.settings.title}
-        </Link>
+        {[
+          { href: "/year", label: copy.mobileNav.year },
+          { href: "/settings", label: copy.settings.title },
+        ].map(({ href, label }) => (
+          <Link
+            key={href}
+            href={href}
+            prefetch={true}
+            onNavigate={onClose}
+            aria-current={matches(pathname, href) ? "page" : undefined}
+            className={cn(
+              "flex min-h-[52px] items-center px-4 text-[15px] transition-colors",
+              matches(pathname, href) ? "font-medium text-blue" : "text-text",
+            )}
+          >
+            {label}
+          </Link>
+        ))}
 
         {/* Same server action as the desktop nav — a plain form post, so it
             works without JS and needs no client handler of its own. */}

@@ -59,6 +59,10 @@ export interface LocalSummary {
   workWindows: number;
   notes: number;
   dayLogs: number;
+  monthlyFocus: number;
+  goals: number;
+  goalMonthlyFocus: number;
+  goalMonthlyKpi: number;
 }
 
 export interface LocalData {
@@ -83,6 +87,13 @@ const summarise = (s: PersistedSlice): LocalSummary => ({
   workWindows: s.workWindows.length,
   notes: s.notes.length,
   dayLogs: s.dayLogs.length,
+  monthlyFocus: s.monthlyFocus.length,
+  // Goals postdate the local-storage era entirely — no browser ever wrote one
+  // — so these are always 0 for a real import. Counted anyway so "every
+  // collection, counted" stays true rather than becoming true-with-an-asterisk.
+  goals: s.goals.length,
+  goalMonthlyFocus: s.goalMonthlyFocus.length,
+  goalMonthlyKpi: s.goalMonthlyKpi.length,
 });
 
 /**
@@ -155,6 +166,20 @@ const ORDER: { table: string; key: keyof RestorePayload; conflict: string }[] = 
   { table: "work_windows", key: "work_windows", conflict: "id" },
   { table: "notes", key: "notes", conflict: "id" },
   { table: "day_logs", key: "day_logs", conflict: "user_id,day" },
+  // After `projects`, whose composite ownership key it depends on. Its natural
+  // key rather than `id`, for the same reason `routine_logs` names its own: a
+  // retry reproduces both the same id *and* the same (project_id, year, month),
+  // and naming the natural key catches the repeat either way.
+  { table: "monthly_focus", key: "monthly_focus", conflict: "project_id,year,month" },
+  // After `projects`. Goals postdate local storage entirely, so this is
+  // always an empty array for a real import — present so the ORDER/summary
+  // machinery doesn't quietly special-case "the newest two tables."
+  { table: "project_goals", key: "project_goals", conflict: "id" },
+  // After `project_goals`, whose composite ownership key it depends on.
+  { table: "goal_monthly_focus", key: "goal_monthly_focus", conflict: "goal_id,year,month" },
+  // Same slot as `goal_monthly_focus` — after `project_goals`, and neither of
+  // the two references the other.
+  { table: "goal_monthly_kpi", key: "goal_monthly_kpi", conflict: "goal_id,year,month" },
 ];
 
 /** Big enough that a normal planner is one request per table. */
@@ -279,6 +304,28 @@ export async function reconcile(userId: string, slice: PersistedSlice): Promise<
     { table: "notes", scope: "notes", locals: slice.notes.map((n) => n.id), column: "id" },
     // A day log is identified by its day, both locally and in the unique key.
     { table: "day_logs", scope: "day_logs", locals: slice.dayLogs.map((d) => d.day), column: "day" },
+    // The same composite string `buildPayload` derives the id from, so the two
+    // cannot drift: if they ever did, this would report rows as missing that
+    // are sitting right there under a different id.
+    {
+      table: "monthly_focus",
+      scope: "monthly_focus",
+      locals: slice.monthlyFocus.map((f) => `${f.projectId}:${f.year}:${f.month}`),
+      column: "id",
+    },
+    { table: "project_goals", scope: "project_goals", locals: slice.goals.map((g) => g.id), column: "id" },
+    {
+      table: "goal_monthly_focus",
+      scope: "goal_monthly_focus",
+      locals: slice.goalMonthlyFocus.map((f) => `${f.goalId}:${f.year}:${f.month}`),
+      column: "id",
+    },
+    {
+      table: "goal_monthly_kpi",
+      scope: "goal_monthly_kpi",
+      locals: slice.goalMonthlyKpi.map((f) => `${f.goalId}:${f.year}:${f.month}`),
+      column: "id",
+    },
   ];
 
   const rows: Reconciliation["rows"] = [];

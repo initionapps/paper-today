@@ -18,10 +18,14 @@
  */
 import type {
   DayLog,
+  GoalMonthlyFocus,
+  GoalMonthlyKpi,
+  MonthlyFocus,
   Note,
   NoteColor,
   PaletteColor,
   Project,
+  ProjectGoal,
   Routine,
   RoutineLog,
   Task,
@@ -113,6 +117,40 @@ export interface DayLogRow {
   reflection: string | null;
 }
 
+export interface MonthlyFocusRow {
+  project_id: string;
+  year: number;
+  month: number;
+  items: string[];
+}
+
+export interface ProjectGoalRow {
+  id: string;
+  project_id: string;
+  title: string;
+  sort_order: number;
+  kpi_label: string | null;
+  kpi_target: number | null;
+  kpi_unit: string | null;
+  target_label: string | null;
+}
+
+export interface GoalMonthlyFocusRow {
+  goal_id: string;
+  project_id: string;
+  year: number;
+  month: number;
+  items: string[];
+}
+
+export interface GoalMonthlyKpiRow {
+  goal_id: string;
+  project_id: string;
+  year: number;
+  month: number;
+  value: number;
+}
+
 // ------------------------------------------------------------------ row → domain
 
 /**
@@ -199,6 +237,51 @@ export const toDayLog = (r: DayLogRow): DayLog => ({
   day: r.day,
   wrappedAt: r.wrapped_at,
   reflection: r.reflection,
+});
+
+/**
+ * `items` arrives as a real array — `text[]` round-trips through PostgREST the
+ * way `routines.weekdays` already does. Copied rather than passed through, so
+ * nothing downstream can mutate the array the response holds.
+ */
+export const toMonthlyFocus = (r: MonthlyFocusRow): MonthlyFocus => ({
+  projectId: r.project_id,
+  year: r.year,
+  month: r.month,
+  items: [...r.items],
+});
+
+/**
+ * A KPI definition's two required fields (label/target) are consistent by
+ * the time they get here — `project_goals_kpi_consistent` (0012, narrowed by
+ * 0015) never lets a half-filled row exist — so checking just one of them is
+ * enough to know whether the whole thing is present.
+ */
+export const toProjectGoal = (r: ProjectGoalRow): ProjectGoal => ({
+  id: r.id,
+  projectId: r.project_id,
+  title: r.title,
+  order: r.sort_order,
+  kpi:
+    r.kpi_label != null && r.kpi_target != null
+      ? { label: r.kpi_label, target: r.kpi_target, unit: r.kpi_unit, targetLabel: r.target_label }
+      : null,
+});
+
+export const toGoalMonthlyFocus = (r: GoalMonthlyFocusRow): GoalMonthlyFocus => ({
+  goalId: r.goal_id,
+  projectId: r.project_id,
+  year: r.year,
+  month: r.month,
+  items: [...r.items],
+});
+
+export const toGoalMonthlyKpi = (r: GoalMonthlyKpiRow): GoalMonthlyKpi => ({
+  goalId: r.goal_id,
+  projectId: r.project_id,
+  year: r.year,
+  month: r.month,
+  value: r.value,
 });
 
 // ------------------------------------------------------------------ domain → row
@@ -288,4 +371,49 @@ export const fromDayLog = (d: DayLog): DayLogRow => ({
   day: d.day,
   wrapped_at: d.wrappedAt,
   reflection: d.reflection,
+});
+
+/**
+ * No `id`, for the same reason `fromDayLog` has none: `monthly_focus` is
+ * upserted on `(project_id, year, month)`, and that triple *is* the row's
+ * identity. On insert the column default supplies the uuid.
+ */
+export const fromMonthlyFocus = (f: MonthlyFocus): MonthlyFocusRow => ({
+  project_id: f.projectId,
+  year: f.year,
+  month: f.month,
+  items: f.items,
+});
+
+export const fromProjectGoal = (g: ProjectGoal): ProjectGoalRow => ({
+  id: g.id,
+  project_id: g.projectId,
+  title: g.title,
+  sort_order: g.order,
+  kpi_label: g.kpi?.label ?? null,
+  kpi_target: g.kpi?.target ?? null,
+  kpi_unit: g.kpi?.unit ?? null,
+  target_label: g.kpi?.targetLabel ?? null,
+});
+
+/**
+ * No `id`, for the same reason `fromMonthlyFocus` has none: `goal_monthly_focus`
+ * is upserted on `(goal_id, year, month)`, and that pair is the row's identity.
+ */
+export const fromGoalMonthlyFocus = (f: GoalMonthlyFocus): GoalMonthlyFocusRow => ({
+  goal_id: f.goalId,
+  project_id: f.projectId,
+  year: f.year,
+  month: f.month,
+  items: f.items,
+});
+
+/** No `id`, for the same reason `fromGoalMonthlyFocus` has none: `goal_monthly_kpi`
+ * is upserted on `(goal_id, year, month)`. */
+export const fromGoalMonthlyKpi = (f: GoalMonthlyKpi): GoalMonthlyKpiRow => ({
+  goal_id: f.goalId,
+  project_id: f.projectId,
+  year: f.year,
+  month: f.month,
+  value: f.value,
 });

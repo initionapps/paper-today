@@ -8,13 +8,15 @@ import { EditableText } from "@/components/task/editable-text";
 import { TaskRow } from "@/components/tasks/task-row";
 import { Section, type SectionAccent } from "@/components/ui/section";
 import { UndoToast } from "@/components/today/undo-toast";
-import { projectTasks, useDayStore } from "@/lib/store/day-store";
+import { goalsForProject, projectTasks, useDayStore } from "@/lib/store/day-store";
 import { useAccountReady } from "@/lib/supabase/account";
 import { dateBucket, todayKey } from "@/lib/date";
 import { copy } from "@/lib/copy";
 import type { Task } from "@/lib/types";
 
+import { LegacyProjectFocus } from "./legacy-project-focus";
 import { ProjectDot } from "./project-color";
+import { ProjectGoals } from "./project-goals";
 import { ProjectMenu } from "./project-menu";
 import { ProjectNotes } from "./project-notes";
 import { ProjectTaskComposer } from "./project-task-composer";
@@ -37,10 +39,12 @@ export function ProjectView({ projectId }: { projectId: string }) {
 
   const projects = useDayStore((s) => s.projects);
   const tasks = useDayStore((s) => s.tasks);
+  const goals = useDayStore((s) => s.goals);
   const updateProject = useDayStore((s) => s.updateProject);
 
   const project = projects.find((p) => p.id === projectId);
   const mine = useMemo(() => projectTasks(tasks, projectId), [tasks, projectId]);
+  const myGoals = useMemo(() => goalsForProject(goals, projectId), [goals, projectId]);
 
   const grouped = useMemo(() => {
     const out: Record<ProjectGroup, Task[]> = { overdue: [], today: [], later: [], none: [] };
@@ -91,6 +95,16 @@ export function ProjectView({ projectId }: { projectId: string }) {
       </header>
 
       <ProjectNotes projectId={project.id} value={project.notes} className="mt-10" />
+
+      <div className="mt-10">
+        <ProjectGoals projectId={project.id} color={project.color} />
+      </div>
+
+      {myGoals.length > 0 && (
+        <div className="mt-8">
+          <LegacyProjectFocus projectId={project.id} goals={myGoals} />
+        </div>
+      )}
 
       <section className="mt-14">
         {mine.length === 0 && (

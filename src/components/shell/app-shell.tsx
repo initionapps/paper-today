@@ -7,7 +7,19 @@ import { cn } from "@/lib/cn";
  * One bounded column on a cool canvas. The day stays finite because the column
  * is finite — not because it pretends to be a piece of paper.
  *
- * `wide` is for the Schedule alone, which needs a sidebar beside the rail.
+ * Three widths, because three screens genuinely need different room:
+ *
+ *   reading  900px   the default. A column you read down.
+ *   wide    1180px   the Schedule: a sidebar beside the rail.
+ *   matrix  1520px   the annual view, and only it.
+ *
+ * `matrix` exists because months of *readable text* do not fit in a reading
+ * column. The annual matrix scrolls sideways on any screen by design — its
+ * month column is sized to be read (160px), not to make twelve fit — so this
+ * width is not there to prevent the scroll. It decides how much of the year
+ * is in view before it: 1520 minus the 176px project column is 8.4 month
+ * columns, about eight months. At `wide`'s 1180 it would have been five and a
+ * half, which is too little of a year to plan against.
  *
  *
  * PHONES
@@ -25,13 +37,25 @@ import { cn } from "@/lib/cn";
  * The bottom padding is for the fixed nav bar: content has to be able to
  * scroll clear of it, including past the home-indicator inset.
  */
-export function AppShell({ children, wide }: { children: React.ReactNode; wide?: boolean }) {
+const MAX_WIDTH = {
+  reading: "max-w-[900px]",
+  wide: "max-w-[1180px]",
+  matrix: "max-w-[1520px]",
+} as const;
+
+export function AppShell({
+  children,
+  width = "reading",
+}: {
+  children: React.ReactNode;
+  width?: keyof typeof MAX_WIDTH;
+}) {
   return (
     <>
       <div
         className={cn(
           "mx-auto min-h-screen w-full px-4 pt-5 sm:px-8 sm:pt-14",
-          wide ? "max-w-[1180px]" : "max-w-[900px]",
+          MAX_WIDTH[width],
         )}
         style={{
           // Room for the bottom bar on phones; the desktop value (`pb-32`)

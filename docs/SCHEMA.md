@@ -3,8 +3,14 @@
 **Applied and live.** Real data flows through these tables — the app's entire
 state is here, and `localStorage` no longer holds any of it.
 
-Six migrations, all applied and **frozen**. Every change from here is a new
-numbered migration; none of these are edited in place again.
+Eighteen migrations. `0001`–`0011` are applied and **frozen**. `0012`–`0013`
+introduced a static "one current value per goal" KPI shape that turned out to
+be wrong (a KPI needs to show progress *across months*, not one overwritable
+number) — **their applied status is unconfirmed**, so every migration since
+assumes `0012`/`0013` *might* already be live and only ever adds or replaces,
+never edits `0012`/`0013` in place. `0014`–`0018` are written and validated
+but **not yet applied**. Every change from here is a new numbered migration;
+none of these are edited in place again.
 
 | | |
 | --- | --- |
@@ -14,6 +20,18 @@ numbered migration; none of these are edited in place again.
 | [`0004_task_completion_constraint.sql`](../supabase/migrations/0004_task_completion_constraint.sql) | lets an archived task keep its completion time |
 | [`0005_migration_marker.sql`](../supabase/migrations/0005_migration_marker.sql) | `profiles.local_migrated_at` |
 | [`0006_restore_backup.sql`](../supabase/migrations/0006_restore_backup.sql) | transactional whole-account replace, `security invoker` |
+| [`0007_monthly_focus.sql`](../supabase/migrations/0007_monthly_focus.sql) | the annual map — 10th table, RLS + 4 policies |
+| [`0008_restore_backup_monthly_focus.sql`](../supabase/migrations/0008_restore_backup_monthly_focus.sql) | replaces `restore_backup` so it carries the new table |
+| [`0009_project_goals.sql`](../supabase/migrations/0009_project_goals.sql) | up to 5 goals per project — 11th table, a `BEFORE INSERT` cap trigger, RLS + 4 policies |
+| [`0010_goal_monthly_focus.sql`](../supabase/migrations/0010_goal_monthly_focus.sql) | goal-owned focus, sibling to `monthly_focus` — 12th table, RLS + 4 policies |
+| [`0011_restore_backup_goals.sql`](../supabase/migrations/0011_restore_backup_goals.sql) | replaces `restore_backup` again so it carries both new tables |
+| [`0012_project_goals_kpi.sql`](../supabase/migrations/0012_project_goals_kpi.sql) | **superseded by `0015`** — added a single `kpi_current` column per goal |
+| [`0013_restore_backup_goal_kpi.sql`](../supabase/migrations/0013_restore_backup_goal_kpi.sql) | **superseded by `0016`** — replaced `restore_backup` to carry `kpi_current` |
+| [`0014_goal_monthly_kpi.sql`](../supabase/migrations/0014_goal_monthly_kpi.sql) | one KPI *value* per goal per month — 13th table, sibling to `goal_monthly_focus`, RLS + 4 policies |
+| [`0015_migrate_goal_kpi_current.sql`](../supabase/migrations/0015_migrate_goal_kpi_current.sql) | backfills any existing `kpi_current` into `goal_monthly_kpi`, then drops the column |
+| [`0016_restore_backup_goal_monthly_kpi.sql`](../supabase/migrations/0016_restore_backup_goal_monthly_kpi.sql) | replaces `restore_backup` again so it carries `goal_monthly_kpi` instead of `kpi_current` |
+| [`0017_project_goals_target_label.sql`](../supabase/migrations/0017_project_goals_target_label.sql) | one nullable `target_label text` column on `project_goals` — a free-text display form of the KPI target |
+| [`0018_restore_backup_target_label.sql`](../supabase/migrations/0018_restore_backup_target_label.sql) | replaces `restore_backup` again so it carries `target_label` |
 
 **`0003` exists because RLS and `GRANT` are independent.** `0001` enabled row
 level security but never granted table privileges: RLS decides *which rows* a
@@ -29,15 +47,42 @@ completion time — a row the old constraint rejected. The fix widened the
 database to match the model rather than editing the data to fit the database:
 `open` must have no timestamp, `done` must have one, `archived` may have either.
 
+**`0007` adds the only table that is not about a day.** Everything else here
+records what happened or is planned on a date; `monthly_focus` holds up to
+three things that matter for one project in one month — a planning surface, not
+a task list. It is deliberately unlinked to `tasks`: nothing is generated from
+it and nothing reads it but the annual view. Its `items text[]` follows
+`routines.weekdays` rather than becoming three child rows, because the order is
+part of the value and a `position` column would be a second thing to keep
+honest. A cell with nothing in it has **no row**, the same way an untouched
+routine has no `routine_log` — hence `between 1 and 3`, not `<= 3`.
+
+The `coalesce` in that bound is load-bearing: `array_length('{}', 1)` is NULL,
+and a CHECK passes when its expression is NULL, so without it every empty array
+would slip through. Same trap as the CASE without an ELSE in `0004`.
+
+**`0009`/`0010` add project goals as a second, sibling planning surface.** A
+project can have up to 5 `project_goals`; once it has any, its monthly focus
+moves from `monthly_focus` (project-level) to `goal_monthly_focus`
+(goal-level) going forward — but existing `monthly_focus` rows are **never**
+migrated, deleted or reassigned automatically. See decision 8 for why this is
+two tables rather than one, and `docs/ARCHITECTURE.md` / the app's
+`LegacyProjectFocus` component for how that leftover data is surfaced.
+
 ```
-profiles ──┬── projects ──┐
-           ├── routines ──┼── routine_logs   (one row per routine per day)
+profiles ──┬── projects ──┬── monthly_focus       (one row per project per month)
+           │              │
+           │              └── project_goals ──┬── goal_monthly_focus
+           │                                  │   (one row per goal per month)
+           │                                  └── goal_monthly_kpi
+           │                                      (one value per goal per month)
+           ├── routines ──┼── routine_logs        (one row per routine per day)
            ├── tasks ─────┘
-           ├── notes                          (never joined to tasks)
-           └── day_logs                       (wrap-up record)
+           ├── notes                               (never joined to tasks)
+           └── day_logs                            (wrap-up record)
 ```
 
-## The seven decisions worth arguing about
+## The eleven decisions worth arguing about
 
 **1. A day is a `date` column, not a table.**
 `tasks.planned_date` is the day a task is intended for. A "day" has no identity
@@ -168,6 +213,80 @@ re-normalised in a background pass when they run out of precision (~50
 consecutive inserts at the same spot); the client already generates orders this
 way today.
 
+**8. `goal_monthly_focus` is a sibling table, not a nullable `goal_id` on
+`monthly_focus`.** The polymorphic shape looked obviously simpler at first: one
+table, an extra nullable `goal_id`, "project-level" meaning `goal_id is null`.
+It does not work. "At most one project-level row per (project, year, month)"
+needs a **partial** unique index (`unique (project_id, year, month) where
+goal_id is null`), because SQL `UNIQUE` never treats two `NULL`s as duplicates
+— a plain unique constraint on `(project_id, goal_id, year, month)` would let
+unlimited project-level rows through. Postgres can only resolve `INSERT ...
+ON CONFLICT` against a partial index by repeating that index's `WHERE` clause
+in the `ON CONFLICT` clause itself, and PostgREST's `.upsert(row, {onConflict:
+"project_id,year,month"}})` has no way to express a predicate — it emits a
+plain column list. There is no client-side workaround that keeps upsert
+semantics. Two structurally identical sibling tables sidestep the whole
+problem: each gets an ordinary, total `unique` key
+(`(project_id, year, month)` and `(goal_id, year, month)` respectively), and
+`goal_id` never needs to be nullable anywhere. The cost is a small amount of
+duplication (two tables, two mapper pairs, two repository methods) instead of
+one polymorphic path — judged worth it because the alternative wasn't a
+style choice, it was something PostgREST genuinely cannot express.
+`goal_monthly_focus.goal_id` carries the same composite-ownership shape as
+`tasks.project_id` (§ Cross-user references, below): `foreign key (goal_id,
+project_id, user_id) references project_goals (id, project_id, user_id)`, so a
+goal can never borrow another project's or another user's focus row at the
+engine level.
+
+**9. A goal's KPI *definition* is two nullable columns on `project_goals`,
+not a table.** `kpi_label` and `kpi_target` (`kpi_unit` a third, independently
+optional either way) describe the goal itself and never repeat — a goal has
+one direction and one target, full stop. This has no uniqueness concern at
+all: it is strictly one-optional-definition-per-goal, never part of any key,
+so a nullable column pair on the row that owns it is the simplest shape that
+is still correct. `kpi_target` is `double precision`, matching `sort_order`
+and the notes' `x`/`y`/`rotation`, specifically to avoid a real trap —
+Supabase/PostgREST returns `numeric` columns as *strings*, which would force
+`parseFloat` on every read for no benefit on a value that is a display count
+or amount, not money needing exact decimal arithmetic. `project_goals_kpi_consistent`
+(`0012`, narrowed by `0015`) enforces that the two required fields travel
+together — a goal has no KPI at all or a complete definition, never a
+half-filled one a future writer has to keep in step by hand.
+
+**10. A KPI's actual *value* is `goal_monthly_kpi`, a `goal_monthly_focus`
+sibling — not a third column on `project_goals`.** The first version of this
+feature (`0012`) put a single `kpi_current` column on the goal, and that was
+a real design mistake, not a style call: a KPI's purpose is to show progress
+*across months*, and one overwritable column can only ever hold the latest
+number, destroying history on every edit — the exact shape `monthly_focus`
+already avoided for a project's steps. Once the value is understood as "one
+number per goal per calendar month," decision 8's reasoning applies again
+unchanged: `unique (goal_id, year, month)` is an ordinary key (`goal_id` is
+globally unique, the same fact `goal_monthly_focus` and `routine_logs` lean
+on), no partial index or polymorphic column needed. `0014` creates it as a
+plain sibling table, `0015` migrates forward any real `kpi_current` value
+that existed under the old shape (into the calendar month the migration
+happens to run in — the best available answer, since the old model never
+recorded a real one) before dropping the column, and `0016` updates
+`restore_backup` to match. No row for a month means no measurement that
+month — a real `0` is a legitimate value and is kept, exactly like `MonthlyFocus`
+never confusing "empty" with "unset."
+
+**11. `target_label` is one more nullable column on `project_goals`, free
+text, never parsed.** A goal's KPI target is a number (`kpi_target`) because
+something eventually needs to measure and calculate against it — but showing
+that bare number in the annual view reads badly: "יעד: 12000" says less than
+"יעד: 12,000 איש ברשימת תפוצה" or "יעד: Readiness 80," and there is no
+reliable way to derive either sentence from a number and a unit alone (which
+word order, which units get spelled out, whether the metric name belongs in
+the sentence at all — all genuinely free choices, not a formatting problem).
+So the sentence is typed once, stored as-is (`0017`), and shown as-is via
+`kpiTargetText`, which falls back to `kpi_target` + `kpi_unit` only when
+`target_label` is absent. No CHECK constraint ties it to `kpi_label`/
+`kpi_target` being present, matching `kpi_unit`'s own precedent from `0012` —
+it is independently optional either way, and nothing downstream treats an
+orphaned value as worse than unused text.
+
 ## Status, and the invariant that keeps it honest
 
 `status` is `open | done | archived` and `completed_at` must agree with it:
@@ -290,10 +409,28 @@ Three consequences worth knowing:
 
 `routine_logs` cascades instead of nulling: a log without its routine means
 nothing, where a task without a project is an ordinary backlog item.
+`monthly_focus` cascades for the same reason — its `project_id` is `NOT NULL`,
+so a focus cell with no project is not a thing. In practice that cascade almost
+never fires: the app has no "delete project" at all, only `archiveProject`,
+which sets a timestamp and deletes nothing. An archived project keeps its focus
+rows and simply stops being listed; restoring it brings the data back with it.
+
+`project_goals` cascades from `projects` the same way, and both
+`goal_monthly_focus` and `goal_monthly_kpi` cascade a second time from
+`project_goals` — deleting a project transitively removes its goals and both
+of their per-month tables in one statement. Deleting a *goal* (the app's own
+`deleteGoal`, not a project delete) is the one place this cascade fires
+routinely, and it is paired with the store's undo mechanism: the goal, its
+`goal_monthly_focus` rows, and its `goal_monthly_kpi` rows are all captured
+before the delete and reinserted together if the user undoes it, so none of
+the three ever drift apart. Clearing a goal's KPI *definition*
+(`setGoalKpi(id, null)`) is different and deliberately does not cascade —
+see the note on that action in `day-store.ts` for why real measurements
+already entered are treated as history worth keeping, not draft state.
 
 ## Row-level security
 
-RLS is enabled on all nine tables, with **four explicit policies each** —
+RLS is enabled on all thirteen tables, with **four explicit policies each** —
 `select`, `insert`, `update`, `delete` — rather than one `for all`. The two are
 functionally equivalent; the split is for auditability. You can see at a glance
 that DELETE is restricted, and one command can change later without silently

@@ -58,6 +58,10 @@ export interface BackupSummary {
   notes: number;
   timeBlocks: number;
   workWindows: number;
+  monthlyFocus: number;
+  goals: number;
+  goalMonthlyFocus: number;
+  goalMonthlyKpi: number;
 }
 
 export type ParseResult =
@@ -105,6 +109,10 @@ export function parseBackup(text: string): ParseResult {
     "workWindows",
     "notes",
     "dayLogs",
+    "monthlyFocus",
+    "goals",
+    "goalMonthlyFocus",
+    "goalMonthlyKpi",
   ] as const;
   for (const key of arrays) {
     // absent is fine (older backups predate some of these); wrong type is not
@@ -127,6 +135,10 @@ export function parseBackup(text: string): ParseResult {
     workWindows: list("workWindows"),
     notes: list("notes"),
     dayLogs: list("dayLogs"),
+    monthlyFocus: list("monthlyFocus"),
+    goals: list("goals"),
+    goalMonthlyFocus: list("goalMonthlyFocus"),
+    goalMonthlyKpi: list("goalMonthlyKpi"),
   };
 
   return {
@@ -141,6 +153,10 @@ export function parseBackup(text: string): ParseResult {
       notes: data.notes.length,
       timeBlocks: data.timeBlocks.length,
       workWindows: data.workWindows.length,
+      monthlyFocus: data.monthlyFocus.length,
+      goals: data.goals.length,
+      goalMonthlyFocus: data.goalMonthlyFocus.length,
+      goalMonthlyKpi: data.goalMonthlyKpi.length,
     },
   };
 }

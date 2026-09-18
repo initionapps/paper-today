@@ -13,6 +13,8 @@ const TABS = [
   { href: "/schedule", label: copy.nav.schedule },
   { href: "/tasks", label: copy.nav.tasks },
   { href: "/projects", label: copy.nav.projects },
+  // Between the projects it plans and the settings that are not a destination.
+  { href: "/year", label: copy.nav.year },
   { href: "/settings", label: copy.settings.title },
 ];
 
@@ -57,9 +59,11 @@ export function NavTabs() {
   const shown = pending ?? pathname;
 
   return (
-    // Hidden on phones, where `MobileNav` takes over. This row needs 392px for
-    // its five Hebrew labels plus sign-out and was the single largest source of
+    // Hidden on phones, where `MobileNav` takes over. This row needs ~447px for
+    // its six Hebrew labels plus sign-out and was the single largest source of
     // horizontal overflow in the app — at 360px it pushed every page sideways.
+    // It first appears at 640px, where there are 576px of content width, so the
+    // sixth pill fits with room to spare; a seventh would want re-measuring.
     <nav className="mb-10 hidden items-center gap-1 sm:flex">
       {TABS.map((tab) => {
         // /projects stays lit while you're inside /projects/<id>

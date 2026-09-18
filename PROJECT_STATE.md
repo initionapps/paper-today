@@ -44,15 +44,37 @@ clean; keep them that way.
 | Routines: create/edit, recurrence, fixed time, daily override, archive | done |
 | **Recurring weekly work hours** (Schedule availability defaults) | remaining |
 | Supabase client wiring (`@supabase/ssr`, browser + server) | done |
-| Supabase schema + RLS (`0001`–`0006`) | applied |
+| Supabase schema + RLS (`0001`–`0011`) | applied |
 | Email/password auth (signup, sign-in, sign-out, reset) | done, verified end to end |
 | **Supabase persistence** (repository, write queue, account loader) | done, verified end to end |
 | **Data migration: localStorage → Supabase** | done, real data migrated and verified |
+| **Annual view** (`/year`, `monthly_focus`) | done, applied |
+| **Project goals** (up to 5 per project, `project_goals` + `goal_monthly_focus`) | done, applied |
+| **Goal KPI** (definition on the goal, one value per goal per month) | code done; **`0014`–`0018` not yet applied, `0012`/`0013` superseded** |
 
 Routes: `/today` · `/schedule` · `/tasks` · `/projects` · `/projects/[id]` ·
-`/settings`, all behind auth · `/login` · `/signup` · `/forgot-password` ·
-`/reset-password` · `/auth/callback` · `/auth/confirm`. `/` sends you to
-`/today` when signed in and `/login` when not.
+`/year` · `/settings`, all behind auth · `/login` · `/signup` ·
+`/forgot-password` · `/reset-password` · `/auth/callback` · `/auth/confirm`.
+`/` sends you to `/today` when signed in and `/login` when not.
+
+**Goal KPI was redesigned before `0012`/`0013` necessarily ever shipped.**
+The first version put one overwritable `kpi_current` column on the goal —
+wrong, because a KPI needs to show progress *across months*. `0014`–`0016`
+replace that with a `goal_monthly_kpi` table (one value per goal per real
+calendar month) and narrow `project_goals` back down to just the definition
+(`kpi_label`/`kpi_target`/`kpi_unit`). **Whether `0012`/`0013` were ever
+applied to the live database is unconfirmed** — `0015` handles both cases
+safely: if `kpi_current` has real data, it's backfilled into
+`goal_monthly_kpi` (dated to whichever month the migration happens to run
+in) before the column is dropped; if the column was never applied at all,
+apply `0009`–`0011` and `0014`–`0018` in order and skip `0012`/`0013`
+entirely — 0009-0011 grant no benefit from 0012/0013. `0017` then adds
+`target_label`, a separate free-text display form of the target (see below).
+**Whichever path applies, the current code (`loadAll()`'s `project_goals`
+select asks for `kpi_label`/`kpi_target`/`kpi_unit`/`target_label`, no
+`kpi_current`, plus a `goal_monthly_kpi` select) only works once the
+database matches `0018`'s end state** — the same all-or-nothing failure mode
+every prior migration batch in this project has had before being applied.
 
 **Supabase is the source of truth.** Every row lives in Postgres, scoped to one
 `auth.users` id and fenced by RLS. Zustand is still the store the components
@@ -89,9 +111,9 @@ All 41 project-linked tasks still resolve, no routine log is orphaned, and both
 archived-but-completed tasks kept their completion timestamps — the exact case
 `0004` was widened for.
 
-Six migrations are applied and frozen — `0001_init`, `0002_profile_trigger`,
-`0003_grants`, `0004_task_completion_constraint`, `0005_migration_marker`,
-`0006_restore_backup`. Every change from here is a new numbered migration.
+Eleven migrations are applied and frozen — `0001_init` through
+`0011_restore_backup_goals`; see [`docs/SCHEMA.md`](docs/SCHEMA.md) for the
+full table. Every change from here is a new numbered migration.
 **`0003` exists because `0001` enabled RLS but never granted table
 privileges**: RLS decides which rows a role sees, `GRANT` decides whether it
 may touch the table at all, and without both a fully authenticated user gets
@@ -151,7 +173,90 @@ State lives in Supabase. `src/lib/store/day-store.ts` holds the in-memory copy
 of the signed-in account and no longer persists anything to the browser; each
 action updates state and queues its write through `lib/supabase/write-queue.ts`.
 
-`STORE_VERSION = 6` still matters, but only for *legacy* envelopes: backup files
+- **`MonthlyFocus` is not a task.** Up to three ordered short strings for one
+  project in one month, with no status, completion, date or progress of any
+  kind, and nothing is ever generated from it. Its natural key is
+  `(projectId, year, month)` and it carries **no `id`** — the same shape as
+  `DayLog`. `items` is never empty: emptying a cell deletes the row.
+- **A project can have up to `MAX_GOALS` (5) `ProjectGoal`s.** A goal is a
+  short named direction inside a project — title, explicit integer `order`,
+  and at most one optional `GoalKpi` (see below). No status, progress-beyond-
+  the-KPI, or due date. Monthly focus then belongs either to the project
+  directly (`MonthlyFocus`, no goals yet) or to one of its goals
+  (`GoalMonthlyFocus`, once any exist) — never both for the same project at
+  the same time in the UI, though old project-level rows are deliberately left
+  in place when goals are added (see the trap below). The **annual matrix
+  shows only projects that have goals**; a goal-less project is filtered out
+  of it entirely (no row, no group header, no separator) and keeps its own
+  focus editor in the month panel, which is where its `MonthlyFocus` items
+  stay visible and editable. Presentation only — the Projects screen and
+  everything else are unaffected. `GoalMonthlyFocus` is
+  structurally identical to `MonthlyFocus`, keyed by `(goalId, year, month)`
+  instead of `(projectId, year, month)`. Goal `order` is a plain 0-based
+  integer, **not** the fractional `sort_order` pattern used elsewhere in this
+  file — an explicit user preference, since goals reorder as a short,
+  rarely-changed list rather than a drag target; `reorderGoals` rewrites every
+  affected row's order, the same shape as `reorderRoutines`.
+- **A goal's `kpi: GoalKpi | null` is a *definition* only — `label`,
+  `target`, optional `unit`, optional `targetLabel`.** `null`, not an
+  optional key, matching `archivedAt`'s convention. `label`/`target` travel
+  together — a goal has no KPI at all or a complete definition, enforced by
+  `project_goals_kpi_consistent` (`0012`, narrowed by `0015`) and mirrored
+  client-side in `setGoalKpi`. Lives as columns on `project_goals` itself,
+  **not** a sibling table — a definition has no uniqueness concern to force
+  one. See decision 9 in [`docs/SCHEMA.md`](docs/SCHEMA.md).
+- **`targetLabel` (`0017`) is a separate, optional, free-text *sentence* for
+  display — "12,000 איש ברשימת תפוצה," "Readiness 80," "3 אימונים בשבוע."**
+  `target` stays the only number anything measures against or ever
+  calculates from; `targetLabel` is never parsed back into one — the two
+  fields serve different jobs (measurement vs. display) and neither can
+  substitute for the other. `kpiTargetText(kpi)` (in `types.ts`) resolves
+  which one to show: `targetLabel` if present, otherwise a plain fallback
+  built from `target` + `unit`. Both the annual matrix's goal-column line
+  and the Project screen's own summary call this same function, so the two
+  screens can never show two different resolutions of the same goal's
+  target. No CHECK ties `targetLabel` to `label`/`target` being present,
+  matching `kpi_unit`'s own looseness (see decision 11 in `docs/SCHEMA.md`).
+- **A KPI's actual *value* is `GoalMonthlyKpi`, one per goal per real
+  calendar month — not a field on the goal.** The first cut of this feature
+  put a single overwritable `kpi_current` on the goal; that was a genuine
+  design mistake (see decision 10 in `docs/SCHEMA.md`), since a KPI exists to
+  show progress *across* months and one column can only ever hold the
+  latest number. `GoalMonthlyKpi` is structurally the `GoalMonthlyFocus`
+  sibling this always should have been: keyed by `(goalId, year, month)`, no
+  `id` in the domain type, no row for a month with no measurement — and a
+  real `0` is a legitimate value, kept exactly like any other. `setGoalMonthlyKpi`
+  mirrors `setGoalMonthlyFocus`'s "set the whole cell, every time" contract.
+  Clearing a goal's KPI *definition* (`setGoalKpi(id, null)`) deliberately
+  does **not** delete its recorded values — they simply stop being shown
+  until a definition exists again, the same "never silently discard data"
+  principle the Goals feature's legacy-focus handling already established.
+  The annual matrix shows the raw value + unit as a small centred chip
+  (`self-center`, shrink-wrapped — not stretched to the white focus cards'
+  width, so it reads as a compact chip rather than another card) at the top
+  of each month's cell — in a slot every cell of a KPI-carrying row reserves,
+  measured or not, the empty case being the same chip rendered `invisible`,
+  so focus cards start on one line right across the row. It shows the
+  resolved target sentence (`kpiTargetText`)
+  as a wrapping secondary line under the goal's own name in the frozen
+  column. Both relate to the app's existing `--color-gold` family (see the
+  trap below on why reusing it is safe), but carry it very differently: the
+  chip is full-strength `text-gold` throughout, while on the definition line
+  **only the label `יעד:` is gold** (`text-gold-deep`, `font-medium`) and
+  the target text itself is ordinary `text-text-2` at 11.5px. Gold there
+  marks the *category* — "this is the KPI family" — and stops; colouring the
+  whole sentence gold was tried first and read as weak, because the one
+  thing you want to read at a glance ended up in the least legible colour on
+  the row. Splitting it is also what let the line grow from 10.5px to
+  11.5px: size now separates it from the 13px goal title, so colour no
+  longer has to. No percentage, no metric name, no bar inside a month cell
+  itself — the target only ever appears once, under the goal's name, and
+  wraps rather than truncating: a target sentence is meant to be read in
+  full. The Project screen shows the same resolved text too, as plain
+  (non-gold) text — gold is reserved for the annual view, where it sits
+  beside the monthly chip it relates to.
+
+`STORE_VERSION = 11` still matters, but only for *legacy* envelopes: backup files
 carry it, and `migratePersisted` reads both those and any browser that has not
 yet run the one-time import.
 
@@ -164,7 +269,13 @@ and add its `write()` call in the action that changes it.
 user has real data in their own browser; a rename without a migration destroys
 it. Existing steps: v1→v2 (`day`→`plannedDate`, `durationMin`→`scheduledEndMin`),
 v2→v3 (project `description`/`notes`), v3→v4 (`timeBlocks`, `workWindows`),
-v4→v5 (routine `archivedAt` + fixed times), v5→v6 (task `isImportant`).
+v4→v5 (routine `archivedAt` + fixed times), v5→v6 (task `isImportant`),
+v6→v7 (`monthlyFocus`), v7→v8 (`goals`, `goalMonthlyFocus` — both default `[]`),
+v8→v9 (each goal gains `kpi`, default `null`), v9→v10 (a goal's `kpi.current`,
+if a legacy envelope still has one, becomes one `goalMonthlyKpi` entry dated
+to the month the browser loads it in — the same "don't discard it" backfill
+`0015` does server-side, at the same granularity), v10→v11 (a goal's `kpi`
+gains `targetLabel`, default `null`).
 
 **`isImportant` is a marker, not a priority.** One boolean, default `false`,
 independent of `size`, and nothing sorts, groups or filters on it. It draws a
@@ -261,15 +372,20 @@ touching blocks never share an edge. Purely visual — no stored time changes.
 src/
   app/            routes; layout.tsx holds the fonts and dir="rtl"
   components/
-    shell/        AppShell (wide variant for Schedule), NavTabs
+    shell/        AppShell (wide: Schedule + Year), NavTabs, MobileNav
     task/         shared by Today + All Tasks: EditableText, TaskMenu, meta
     today/        TodayView, cards, composers, notes, wrap-up, motto
     tasks/        AllTasksView, TaskRow, FilterBar
-    projects/     ProjectsView, ProjectView, colour picker, notes
+    projects/     ProjectsView, ProjectView, colour picker, notes,
+                  ProjectGoals (up to 5 goals), LegacyProjectFocus (pre-goals
+                  monthly_focus rows, surfaced for move-or-delete only)
     schedule/     ScheduleView, Timeline, RailBlock, sidebar, work hours
+    year/         YearView (matrix ⇄ month), AnnualMatrix, MonthFocus, FocusEditor
     settings/     BackupPanel, ImportPanel (the one-time localStorage import)
     sync-banner.tsx  the only place an unsaved write becomes visible
-    ui/           Checkbox, Popover, Section
+    ui/           Checkbox, Popover, Section, GoalKpiValueBadge (one month's
+                  KPI value — shared by AnnualMatrix and MonthFocus; the
+                  Project screen shows the KPI's target as plain text instead)
   lib/
     types.ts      domain types — the contract with the DB
     copy.ts       every user-facing string (Hebrew)
@@ -302,6 +418,21 @@ src/
 
 Each of these was a real bug that took real debugging.
 
+- **A CHECK passes when its expression is NULL, and `array_length` of an empty
+  array *is* NULL.** `check (array_length(items,1) between 1 and 3)` waves every
+  empty array straight through. It needs `coalesce(array_length(items,1), 0)`.
+  This is the same shape as the `CASE` without an `ELSE` in `0004` — the second
+  time this exact hole was nearly shipped. Grammar parsing will not catch it;
+  only executing it against a real server does.
+- **A horizontally scrolling grid escapes `overflow-x-auto` in RTL.** The
+  annual matrix scrolls correctly inside its wrapper — `clientWidth` 356,
+  `scrollWidth` 560 — and Chrome *still* propagated the inline-end overflow to
+  the document, which stretched the `fixed inset-x-0` bottom nav to 558px and
+  gave every page the horizontal scroll the mobile pass existed to remove.
+  `overflow-x: clip` and `isolation` do not help; `contain: paint` does, by
+  making the wrapper a containing block. Measured 559px → 390px. If you add
+  another sideways-scrolling region, check the document width, not just the
+  region's.
 - **Never merge intervals on write.** Work hours are edited via
   `<input type="time">`, which emits intermediate values while typing ("13:00"
   passes through "01:00"). Merging on every keystroke fused a transiently
@@ -452,6 +583,64 @@ Each of these was a real bug that took real debugging.
   `https:` = the URL; 46/`sb_pub` = the key), plus a live probe that actually
   called Supabase with the value. Diagnose config by *shape and effect*, never
   by existence.
+- **A nullable discriminator column plus a partial unique index cannot be
+  upserted through PostgREST.** The obvious shape for goal-owned focus was one
+  `monthly_focus` table with a nullable `goal_id`, and "at most one
+  project-level row per (project, year, month)" needs a partial unique index
+  (`... where goal_id is null`) because SQL `UNIQUE` never treats two `NULL`s
+  as duplicates. Postgres can resolve `INSERT ... ON CONFLICT` against a
+  partial index only by repeating its `WHERE` predicate in the `ON CONFLICT`
+  clause — which `.upsert(row, { onConflict: "..." })`'s plain column-list
+  string cannot express. This is why `goal_monthly_focus` is a separate sibling
+  table, not a nullable column on `monthly_focus`; the two-table design was a
+  constraint, not a style preference. See decision 8 in `docs/SCHEMA.md` — and
+  decisions 9/10 for the KPI's two *different* calls on the same question: no
+  uniqueness concern exists for the KPI's fixed *definition* (label/target),
+  so that stays two plain nullable columns on `project_goals`; but the KPI's
+  *value* turned out to need exactly `goal_monthly_focus`'s own shape once it
+  was understood as "one number per month," and the first version of this
+  feature (`0012`) got that wrong by putting a single overwritable
+  `kpi_current` on the goal, destroying history on every edit — corrected in
+  `0014`–`0016`. The lesson generalises: a superficially-similar "one more
+  optional thing" is not one call, it's a fresh check of whether *this*
+  attribute needs a key at all.
+- **A live, uncommitted `<textarea>`/`<input>` is still part of
+  `document.body.textContent`.** Verifying a save by grepping page text after
+  typing gives a false positive — it cannot distinguish "typed but never
+  committed to the store" from "actually saved". Query the specific rendered
+  element (`input.value`, or the real `<li>` list an item renders into) instead
+  of `body.textContent`, and to check real persistence, force a remount that
+  does not reset the store (switching tabs in a harness, not reloading the
+  page) and re-read the same element.
+- **`--color-gold` already meant something before the KPI badge needed a
+  gold treatment.** `globals.css` reserves gold for exactly one thing — a Big
+  task's card — and says so explicitly: "if a project could be gold, gold
+  would stop meaning 'big'." That reservation is scoped to `PaletteColor` (a
+  *project's own* selectable accent) never including gold, not a blanket ban
+  on the hex values appearing anywhere else. The KPI badge
+  (`goal-kpi-badge.tsx`) reuses the same three tokens outright rather than
+  minting a second, slightly-different gold — it carries no project-
+  selectable colour of its own and never appears near a task's size marker,
+  so there is nothing here for a project to "become." Two near-identical
+  golds meaning two different things would have been worse than reusing one
+  gold for two *unrelated* surfaces that never appear together.
+- **An accent colour and a text colour are not the same job, even in the same
+  family.** `--color-gold` (`#c9a227`) was designed to be a hover border and
+  a tint — both cases where WCAG contrast doesn't apply. The first version of
+  the goal-column KPI line used it at partial opacity for exactly that
+  reason, and it read as pale and hard to read, because the base value fails
+  text contrast on white outright (~2.6:1, nowhere near the 4.5:1 normal text
+  needs) — no opacity value was ever going to fix that, since opacity only
+  moves *toward* the failing number. The fix was a genuinely new, darker
+  token (`--color-gold-deep`, ~5.5:1) rather than a tweak to an existing one:
+  reusing `gold`/`gold-line`/`gold-soft` was right when the job was an
+  accent, and wrong once the job became a sentence someone has to read.
+  The second half of the lesson: even at AA, the darker token still read as
+  "weak and awkward" while it carried the *whole* line, because a warm
+  yellow-brown is a category marker, not a text colour. What worked was
+  shrinking the coloured region rather than darkening it further — gold on
+  `יעד:` alone, plain `text-text-2` for the target. A palette colour that
+  says "which kind of thing is this" should label content, not be it.
 - **Never hand someone a block of CLI commands where one is interactive.**
   `vercel env add` waits for a value on stdin; pasted as a block, it swallowed
   the *next command line* and stored it as the key (66 chars beginning

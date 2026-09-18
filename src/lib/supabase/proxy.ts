@@ -4,7 +4,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { supabaseEnv } from "./env";
 
 /** Everything behind the nav. Unauthenticated visitors get sent to /login. */
-const PROTECTED = ["/today", "/schedule", "/tasks", "/projects", "/settings"];
+const PROTECTED = ["/today", "/schedule", "/tasks", "/projects", "/year", "/settings"];
 
 /** The auth pages themselves. A signed-in visitor has no business here. */
 const AUTH_PAGES = ["/login", "/signup", "/forgot-password"];

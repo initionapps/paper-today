@@ -102,7 +102,11 @@ export type IdScope =
   | "time_blocks"
   | "work_windows"
   | "notes"
-  | "day_logs";
+  | "day_logs"
+  | "monthly_focus"
+  | "project_goals"
+  | "goal_monthly_focus"
+  | "goal_monthly_kpi";
 
 /**
  * The row id for a local id, for a specific user and table.

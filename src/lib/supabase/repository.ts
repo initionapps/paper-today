@@ -18,23 +18,35 @@ import { createClient } from "@/lib/supabase/client";
 import type { PersistedSlice } from "@/lib/store/day-store";
 import {
   fromDayLog,
+  fromGoalMonthlyFocus,
+  fromGoalMonthlyKpi,
+  fromMonthlyFocus,
   fromNote,
   fromProject,
+  fromProjectGoal,
   fromRoutine,
   fromRoutineLog,
   fromTask,
   fromTimeBlock,
   fromWorkWindow,
   toDayLog,
+  toGoalMonthlyFocus,
+  toGoalMonthlyKpi,
+  toMonthlyFocus,
   toNote,
   toProject,
+  toProjectGoal,
   toRoutine,
   toRoutineLog,
   toTask,
   toTimeBlock,
   toWorkWindow,
   type DayLogRow,
+  type GoalMonthlyFocusRow,
+  type GoalMonthlyKpiRow,
+  type MonthlyFocusRow,
   type NoteRow,
+  type ProjectGoalRow,
   type ProjectRow,
   type RoutineLogRow,
   type RoutineRow,
@@ -44,8 +56,12 @@ import {
 } from "@/lib/supabase/mappers";
 import type {
   DayLog,
+  GoalMonthlyFocus,
+  GoalMonthlyKpi,
+  MonthlyFocus,
   Note,
   Project,
+  ProjectGoal,
   Routine,
   RoutineLog,
   Task,
@@ -53,7 +69,7 @@ import type {
   WorkWindow,
 } from "@/lib/types";
 
-/** The nine tables, in an order that satisfies the foreign keys. */
+/** The twelve tables, in an order that satisfies the foreign keys. */
 export const TABLES = [
   "projects",
   "routines",
@@ -63,6 +79,13 @@ export const TABLES = [
   "work_windows",
   "notes",
   "day_logs",
+  // after `projects`: its composite ownership key needs the project to exist
+  "monthly_focus",
+  "project_goals",
+  // after `project_goals`: both need the goal to exist. Neither references
+  // the other, so their relative order doesn't matter.
+  "goal_monthly_focus",
+  "goal_monthly_kpi",
 ] as const;
 
 export type TableName = (typeof TABLES)[number];
@@ -92,20 +115,40 @@ function fail(op: string, error: { message: string; code?: string; details?: str
 export async function loadAll(): Promise<PersistedSlice> {
   const db = client();
 
-  const [profile, projects, routines, tasks, routineLogs, timeBlocks, workWindows, notes, dayLogs] =
-    await Promise.all([
-      db.from("profiles").select("motto").maybeSingle(),
-      db.from("projects").select("id,name,color,description,notes,sort_order,archived_at"),
-      db.from("routines").select("id,title,weekdays,fixed_start_min,fixed_end_min,sort_order,archived_at,created_at"),
-      db.from("tasks").select(
-        "id,project_id,title,detail,size,status,planned_date,due_date,is_important,sort_order,scheduled_start_min,scheduled_end_min,completed_at,created_at",
-      ),
-      db.from("routine_logs").select("id,routine_id,day,completed_at,scheduled_start_min,scheduled_end_min"),
-      db.from("time_blocks").select("id,day,title,start_min,end_min"),
-      db.from("work_windows").select("id,day,start_min,end_min"),
-      db.from("notes").select("id,day,body,color,x,y,rotation,z,created_at"),
-      db.from("day_logs").select("day,wrapped_at,reflection"),
-    ]);
+  const [
+    profile,
+    projects,
+    routines,
+    tasks,
+    routineLogs,
+    timeBlocks,
+    workWindows,
+    notes,
+    dayLogs,
+    monthlyFocus,
+    goals,
+    goalMonthlyFocus,
+    goalMonthlyKpi,
+  ] = await Promise.all([
+    db.from("profiles").select("motto").maybeSingle(),
+    db.from("projects").select("id,name,color,description,notes,sort_order,archived_at"),
+    db.from("routines").select("id,title,weekdays,fixed_start_min,fixed_end_min,sort_order,archived_at,created_at"),
+    db.from("tasks").select(
+      "id,project_id,title,detail,size,status,planned_date,due_date,is_important,sort_order,scheduled_start_min,scheduled_end_min,completed_at,created_at",
+    ),
+    db.from("routine_logs").select("id,routine_id,day,completed_at,scheduled_start_min,scheduled_end_min"),
+    db.from("time_blocks").select("id,day,title,start_min,end_min"),
+    db.from("work_windows").select("id,day,start_min,end_min"),
+    db.from("notes").select("id,day,body,color,x,y,rotation,z,created_at"),
+    db.from("day_logs").select("day,wrapped_at,reflection"),
+    // Every year at once, not just the one on screen: a whole account's focus
+    // is at most a few hundred short rows, and paging it would add a second
+    // loading state to a screen whose entire job is showing a year at a glance.
+    db.from("monthly_focus").select("project_id,year,month,items"),
+    db.from("project_goals").select("id,project_id,title,sort_order,kpi_label,kpi_target,kpi_unit,target_label"),
+    db.from("goal_monthly_focus").select("goal_id,project_id,year,month,items"),
+    db.from("goal_monthly_kpi").select("goal_id,project_id,year,month,value"),
+  ]);
 
   if (profile.error) fail("load profile", profile.error);
   if (projects.error) fail("load projects", projects.error);
@@ -116,6 +159,10 @@ export async function loadAll(): Promise<PersistedSlice> {
   if (workWindows.error) fail("load work_windows", workWindows.error);
   if (notes.error) fail("load notes", notes.error);
   if (dayLogs.error) fail("load day_logs", dayLogs.error);
+  if (monthlyFocus.error) fail("load monthly_focus", monthlyFocus.error);
+  if (goals.error) fail("load project_goals", goals.error);
+  if (goalMonthlyFocus.error) fail("load goal_monthly_focus", goalMonthlyFocus.error);
+  if (goalMonthlyKpi.error) fail("load goal_monthly_kpi", goalMonthlyKpi.error);
 
   return {
     // A profile row always exists — the signup trigger makes it — but a null
@@ -130,6 +177,10 @@ export async function loadAll(): Promise<PersistedSlice> {
     workWindows: ((workWindows.data ?? []) as WorkWindowRow[]).map(toWorkWindow),
     notes: ((notes.data ?? []) as NoteRow[]).map(toNote),
     dayLogs: ((dayLogs.data ?? []) as DayLogRow[]).map(toDayLog),
+    monthlyFocus: ((monthlyFocus.data ?? []) as MonthlyFocusRow[]).map(toMonthlyFocus),
+    goals: ((goals.data ?? []) as ProjectGoalRow[]).map(toProjectGoal),
+    goalMonthlyFocus: ((goalMonthlyFocus.data ?? []) as GoalMonthlyFocusRow[]).map(toGoalMonthlyFocus),
+    goalMonthlyKpi: ((goalMonthlyKpi.data ?? []) as GoalMonthlyKpiRow[]).map(toGoalMonthlyKpi),
   };
 }
 
@@ -183,6 +234,84 @@ export const saveNote = (n: Note) => upsert("notes", fromNote(n));
  * wrapping the same day twice must update the day rather than add a second row.
  */
 export const saveDayLog = (d: DayLog) => upsert("day_logs", fromDayLog(d), "user_id,day");
+
+/**
+ * Keyed by `(project_id, year, month)` rather than by id, for the same reason
+ * `day_logs` is keyed by the day: `MonthlyFocus` has no id in the domain, and
+ * writing the same cell twice must update that cell rather than add a second
+ * row beside it. `project_id` is globally unique, so the triple identifies the
+ * row without needing `user_id` in the key.
+ */
+export const saveMonthlyFocus = (f: MonthlyFocus) =>
+  upsert("monthly_focus", fromMonthlyFocus(f), "project_id,year,month");
+
+/**
+ * Emptying a cell removes its row — there is no such thing as a stored empty
+ * focus cell (see the CHECK in `0007`). Three `eq`s rather than `remove()`,
+ * which takes a single column, because the identity here is a triple.
+ */
+export async function deleteMonthlyFocus(
+  projectId: string,
+  year: number,
+  month: number,
+): Promise<void> {
+  const { error } = await client()
+    .from("monthly_focus")
+    .delete()
+    .eq("project_id", projectId)
+    .eq("year", year)
+    .eq("month", month);
+  if (error) fail("delete from monthly_focus", error);
+}
+
+/** A goal has a real domain id — unlike `MonthlyFocus`, it's a named thing
+ * you refer to, not a coordinate — so it upserts on `id` like every other
+ * entity in the app. */
+export const saveGoal = (g: ProjectGoal) => upsert("project_goals", fromProjectGoal(g));
+
+export const deleteGoal = (id: string) => remove("project_goals", "id", id);
+
+/**
+ * `GoalMonthlyFocus`'s natural key is `(goal_id, year, month)` — see the note
+ * on the type itself for why `project_id` doesn't need to be part of it.
+ */
+export const saveGoalMonthlyFocus = (f: GoalMonthlyFocus) =>
+  upsert("goal_monthly_focus", fromGoalMonthlyFocus(f), "goal_id,year,month");
+
+export async function deleteGoalMonthlyFocus(
+  goalId: string,
+  year: number,
+  month: number,
+): Promise<void> {
+  const { error } = await client()
+    .from("goal_monthly_focus")
+    .delete()
+    .eq("goal_id", goalId)
+    .eq("year", year)
+    .eq("month", month);
+  if (error) fail("delete from goal_monthly_focus", error);
+}
+
+/**
+ * `GoalMonthlyKpi`'s natural key is `(goal_id, year, month)` — the identical
+ * shape as `GoalMonthlyFocus`, one field instead of an array.
+ */
+export const saveGoalMonthlyKpi = (f: GoalMonthlyKpi) =>
+  upsert("goal_monthly_kpi", fromGoalMonthlyKpi(f), "goal_id,year,month");
+
+export async function deleteGoalMonthlyKpi(
+  goalId: string,
+  year: number,
+  month: number,
+): Promise<void> {
+  const { error } = await client()
+    .from("goal_monthly_kpi")
+    .delete()
+    .eq("goal_id", goalId)
+    .eq("year", year)
+    .eq("month", month);
+  if (error) fail("delete from goal_monthly_kpi", error);
+}
 
 export const deleteTask = (id: string) => remove("tasks", "id", id);
 export const deleteTimeBlock = (id: string) => remove("time_blocks", "id", id);

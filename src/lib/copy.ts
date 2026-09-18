@@ -12,6 +12,8 @@ export const copy = {
     schedule: "לוח זמנים",
     tasks: "כל המשימות",
     projects: "פרויקטים",
+    /** One short word, not the page title — it shares a row with five others. */
+    year: "שנה",
   },
 
   /**
@@ -27,6 +29,8 @@ export const copy = {
     more: "עוד",
     moreTitle: "עוד",
     close: "סגור",
+    /** In the sheet, where there is room for the real title. */
+    year: "מבט שנתי",
   },
 
   auth: {
@@ -180,6 +184,58 @@ export const copy = {
     label: "הכוונה שלי",
   },
 
+  year: {
+    title: "מבט שנתי",
+    /** The header's own controls — shift the rolling 12-month window, not a
+     * calendar year. Distinct from `prevMonth`/`nextMonth` below, which step
+     * the month panel's single open month; the two navigate independently. */
+    prevRange: "הזז את הטווח חודש אחורה",
+    nextRange: "הזז את הטווח חודש קדימה",
+    today: "היום",
+    prevMonth: "חודש קודם",
+    nextMonth: "חודש הבא",
+    backToYear: "חזרה למבט השנתי",
+    openMonth: (month: string) => `פתח את ${month}`,
+    monthOf: (month: string, year: number) => `${month} ${year}`,
+    /** The matrix row header column. */
+    projectsColumn: "פרויקטים",
+    empty: "אין עדיין יעדים לשנה הזו",
+    emptyHint: "בחר חודש כדי להוסיף עד שלושה יעדים לכל פרויקט.",
+    noProjects: "אין פרויקטים פעילים",
+    noProjectsHint: "צור פרויקט כדי להתחיל לתכנן את השנה.",
+    /** Distinct from `noProjects`: projects exist, they just have no goals,
+     * and the annual matrix only shows projects that do. Telling someone with
+     * five projects to create a project would be the wrong next step. */
+    noGoalProjects: "אין עדיין מטרות",
+    noGoalProjectsHint: "המבט השנתי מציג פרויקטים עם מטרות. הוסף מטרה לפרויקט כדי שיופיע כאן.",
+    /** Screen-reader label for a cell; the visual version is just the text. */
+    cellLabel: (project: string, month: string) => `${project}, ${month}`,
+    addFocus: "הוסף יעד…",
+    focusLabel: (n: number) => `יעד ${n}`,
+    remove: "הסר",
+    moveUp: "העלה",
+    moveDown: "הורד",
+    max: "עד שלושה יעדים לחודש",
+    countOf: (n: number, max: number) => `${n}/${max}`,
+    /** The month panel's one lightweight field for a goal's KPI, above its
+     * focus editor. Empty clears that month's measurement — see
+     * `setGoalMonthlyKpi`. */
+    kpiValue: "ערך המדד החודש",
+    kpiValuePlaceholder: "ערך…",
+    /** The label half of the secondary line under a goal's name in the annual
+     * matrix's frozen column — "יעד:" followed by the KPI's fixed *target*
+     * (`kpiTargetText`, the same resolved text
+     * `copy.projects.goals.kpi.targetLine` uses, so the two screens can never
+     * disagree about what a goal's target reads as). Never a measured month,
+     * never the metric name.
+     *
+     * A label rather than a whole formatted sentence because the two halves
+     * are coloured differently — gold names the *category*, the target itself
+     * is ordinary secondary text so it stays easy to read. The colon belongs
+     * to the label, and is deliberate. */
+    kpiGoalLabel: "יעד:",
+  },
+
   settings: {
     title: "הגדרות",
     backupTitle: "גיבוי ושחזור",
@@ -232,6 +288,10 @@ export const copy = {
     workWindows: "חלונות עבודה",
     notes: "פתקים",
     dayLogs: "סיכומי יום",
+    monthlyFocus: "יעדים חודשיים",
+    goals: "מטרות",
+    goalMonthlyFocus: "יעדים חודשיים למטרות",
+    goalMonthlyKpi: "ערכי מדד חודשיים",
 
     downloadFirst: "הורד גיבוי לפני הייבוא",
     downloaded: "הגיבוי הורד.",
@@ -370,6 +430,62 @@ export const copy = {
     addTask: "הוסף משימה לפרויקט…",
     /** Tomorrow and later share one group on a project page. */
     groupLater: "מחר ובהמשך",
+
+    goals: {
+      title: "מטרות",
+      hint: "עד חמש מטרות לפרויקט. כשיש לפרויקט מטרות, המבט השנתי מציג שורה לכל מטרה במקום שורה אחת לפרויקט.",
+      add: "מטרה חדשה…",
+      max: "הגעת למקסימום של חמש מטרות בפרויקט הזה.",
+      remove: "מחק מטרה",
+      moveUp: "העלה",
+      moveDown: "הורד",
+      countOf: (n: number, max: number) => `${n}/${max}`,
+
+      /** One optional KPI *definition* per goal — label, numeric target,
+       * unit, and an optional free-text display sentence (`targetLabel`,
+       * `0017`). The compact inline add/edit form here; the actual
+       * month-by-month values live in the annual view instead
+       * (`GoalMonthlyKpi`), not here. */
+      kpi: {
+        add: "הוסף מדד…",
+        edit: "ערוך מדד",
+        remove: "הסר מדד",
+        label: "שם המדד",
+        labelPlaceholder: "לדוגמה: מנויים",
+        target: "יעד מספרי",
+        unit: "יחידה (לא חובה)",
+        targetText: "טקסט לתצוגה (לא חובה)",
+        targetTextPlaceholder: "לדוגמה: 12,000 איש ברשימת תפוצה",
+        /** Directly answers "why are there two target fields" — the numeric
+         * one is never shown as-is; this sentence explains the split right
+         * where someone would otherwise wonder about it. */
+        targetTextHint: "היעד המספרי משמש למדידה. הטקסט הוא מה שמוצג במבט השנתי.",
+        save: "שמור",
+        cancel: "בטל",
+        invalid: "צריך שם ויעד מספרי גדול מאפס.",
+        /** The quiet line under a goal's title once it has a KPI definition —
+         * "יעד: 12,000 איש ברשימת תפוצה", or "יעד: 12,000 נרשמים" when no
+         * `targetLabel` exists yet. Shares its resolution (`kpiTargetText`)
+         * with the annual matrix's own goal-column line — the two must never
+         * show different text for the same goal. */
+        targetLine: (targetText: string) => `יעד: ${targetText}`,
+      },
+    },
+
+    /**
+     * The Project screen's callout for `monthly_focus` rows that predate the
+     * project's goals. Never automatic — every row here waits for an explicit
+     * move or delete. See `legacyFocusForProject` and `moveMonthlyFocusToGoal`.
+     */
+    legacyFocus: {
+      title: "תוכן חודשי שטרם שויך למטרה",
+      hint: "היעדים האלה נכתבו לפני שנוספו מטרות לפרויקט. הם עדיין קיימים, אבל לא מופיעים במבט השנתי עד שתשייך אותם למטרה, או תמחק אותם.",
+      monthLabel: (month: string, year: number) => `${month} ${year}`,
+      moveTo: "שייך למטרה…",
+      move: "שייך",
+      blocked: "לחודש הזה כבר יש תוכן במטרה שנבחרה. בחר מטרה אחרת, או פנה תחילה למטרה הזו.",
+      delete: "מחק",
+    },
   },
 
   notes: {
@@ -388,6 +504,7 @@ export const copy = {
     projectArchived: (name: string) => `הפרויקט ״${name}״ הועבר לארכיון`,
     routineArchived: (title: string) => `השגרה ״${title}״ הועברה לארכיון`,
     blockRemoved: (title: string) => `״${title}״ הוסר מהלוח`,
+    goalDeleted: (title: string) => `המטרה ״${title}״ נמחקה`,
   },
 
   a11y: {
@@ -414,6 +531,13 @@ export const copy = {
     projectDescription: "תיאור הפרויקט",
     projectNotes: "פרטי הפרויקט",
     projectActions: (name: string) => `פעולות עבור ${name}`,
+    goalTitle: "שם המטרה",
+    /** The gold KPI capsule's accessible description — the visual is just the
+     * numbers and a bar, so this spells out what they mean. Field-level
+     * labels reuse `copy.projects.goals.kpi.*` rather than duplicating them
+     * here, the same way the goal composer reuses its own visible prompt. */
+    goalKpiProgress: (label: string, current: string, target: string, unit: string | null, percent: number) =>
+      `${label}: ${current} מתוך ${target}${unit ? ` ${unit}` : ""} · ${percent}%`,
     pickColor: (color: string) => `בחר צבע ${color}`,
     timeline: "ציר היום",
     dragTask: (title: string) => `גרור את ${title} ללוח`,

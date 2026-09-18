@@ -20,10 +20,13 @@ endless task list. Hebrew-first, RTL throughout, local-only.
 | **Backlog** | `planned_date is null`. A real task with no intended day. Visible only in All Tasks — never on Today. | `tasks` |
 | **Routine** | A recurring intention. Its template is stored once; each day it produces a check, never a task row. | `routines` + `routine_logs` |
 | **Project** | Name, accent colour, one-line description, long-form notes. Active or archived, and nothing else — no milestones, no progress, no dependencies. | `projects` |
+| **Goal** | Up to 5 per project: a short named direction, ordered, plus at most one optional KPI (below). No status, no due date, no progress beyond that one KPI. Once a project has goals, the annual view shows one row per goal instead of one row for the project. | `project_goals` |
+| **Goal KPI** | One optional measurable indicator per goal: a fixed *definition* (label, numeric target, optional unit, optional free-text `targetLabel` for display) plus a separate *value* recorded per real calendar month. No history beyond those monthly values, no formula, no second KPI. The resolved target sentence (`targetLabel`, or a plain fallback from the number + unit) shows as a wrapping secondary line under the goal's name in the annual matrix — gold on the "יעד:" label only, ordinary secondary text for the target itself — and as plain text on the Project screen; each month's value shows as a small centred gold chip at the top of that month's cell in the annual matrix and month panel. | definition: columns on `project_goals`; values: `goal_monthly_kpi` |
 | **Note** | Sticky note on the day. **Never** a task, never in All Tasks. | `notes` |
 | **Schedule block** | A task (or routine) dragged onto the hour rail. It stays on Today and gains a time. | fields on the row |
 | **Blocked time** | Meetings, lunch, travel. Occupies time but is not work you tick off — no status, no project, no size. | `time_blocks` |
 | **Work window** | When you are available. No title; a day with none has simply not been told yet. | `work_windows` |
+| **Monthly focus** | Up to 3 short strings for one project (or one goal) in one month. A planning surface, not a task list — nothing is generated from it and nothing reads it but the annual view. | `monthly_focus` / `goal_monthly_focus` |
 
 Two rules that fall out of this and must never be broken:
 
@@ -68,7 +71,83 @@ move to Supabase changed none of them.
 /schedule         A daily visual planner, not a calendar. Sidebar of the day's
                   planned tasks beside a vertical rail; three independent
                   layers over one minute axis.
+/year             The annual map. A rolling 12-month window × projects × up to
+                  three focus items. Not tasks: nothing is generated from it
+                  and nothing else reads it. Only projects that have goals
+                  appear: each becomes a group label plus one row per goal.
+                  See §1 and the Goals note below §4.
 ```
+
+`/year` is one route holding two surfaces. The matrix is for seeing the
+window, the month panel for writing one month of it, and which you get is
+decided in CSS by viewport rather than by stored state — so there is no
+hydration-time viewport guess. The window and the open month are plain
+component state, not URL segments: every route here is dynamic, so routing a
+month change would spend a server round trip on something already in memory.
+That is the same trade the Schedule makes for its day, and it costs the same
+thing — a month is not linkable, and the browser's back button leaves the page
+instead of closing the panel, which is why the way back is drawn on screen
+rather than implied.
+
+**The 12 visible months are a rolling window, not a fixed calendar year.**
+Before, the matrix always showed January–December of one year, which meant
+opening the view in November or December left almost nothing to plan forward
+into without switching years entirely. Now the window is anchored on whichever
+month is first (defaulting to the current month, with 11 months ahead of it —
+"היום" resets to that default), and shifts by one month at a time in either
+direction, so it can straddle a year boundary at any point, not just at its
+ends. The header shows the visible range instead of a bare year — `shortMonthName`
+for each end plus both years when they differ, one year when the window
+happens to land on a single calendar one — and each month column carries its
+own (year, month) pair rather than assuming a shared year, so a KPI/focus cell
+is always read from its actual calendar month regardless of where in the
+window it happens to sit.
+
+**The matrix is sized to be read, not to fit.** A month column is 160px and
+twelve of them do not fit on any real desktop — that is the point. The first
+version picked 86px precisely so all twelve *would* fit, and paid for it in
+the thing the screen exists for: focus items broke across three or four lines,
+KPI units truncated, and the year read as a block of fragments. Seeing twelve
+months at once was never the goal; nobody plans a whole year in one glance,
+they read a stretch of it. So 160px is chosen from the viewport backwards —
+the 1520px shell minus the 176px project column is 8.4 columns, and a 1440px
+laptop gets 7.6 — and the rest of the year is a sideways scroll away. The
+width lives in exactly one place, the table's `min-w-[2096px]` (176 + 12×160);
+`table-fixed` derives the columns from it, so there is no per-column width
+class to fall out of step. The scrollbar itself is hidden (`.no-scrollbar` in
+`globals.css` — three declarations, since Firefox, WebKit and legacy Edge each
+need a different one), which hides only the bar: wheel, trackpad, touch and
+keyboard scrolling are untouched. That is safe *here* specifically because the
+scroll is signposted twice over by the header's month arrows and by columns
+running off the edge.
+
+**The current month is marked as a *column*, not as a set of cells.** It
+carries the `blue-soft` tint it always had, plus a 1px `blue/40` outline — the
+same hue as its own header title, so the tint, the title and the line read as
+one thing. The mechanism matters because the table is `border-separate`: every
+cell in the column contributes only its two *side* edges, the `<thead>` cell
+adds the single top, and the table's final row adds the single bottom, which
+is what makes one continuous frame instead of twelve stacked boxes each with
+its own horizontal rules. The project-header bands have to carry the side
+edges too — they keep their own grey fill, since a band is a divider between
+projects rather than part of any month, but a column that stopped at every
+header and restarted below it would be several outlines, not one. `blue/40`
+rather than full-strength `blue`, and no shadow or stronger fill: at full
+strength a hairline running the height of the table competes with the KPI
+chips and focus cards inside the very column it is framing. `table-fixed`
+means the added borders cost the column nothing in width — measured identical
+in every row, framed or not.
+
+**The window and the month panel's open month are deliberately two
+independent pieces of state, not one shared "year" as before.** When the whole
+matrix was a fixed year, both surfaces reading the same `year` was harmless —
+it was the only context either one had. Once the window can span two calendar
+years, keeping them coupled would mean shifting the window by a single month
+could silently relocate whichever month the panel had open by a whole year.
+So the header's prev/next shift `windowStart` by a month, the month panel's
+own prev/next step its own open `(year, month)` by a month (still rolling the
+year over at Dec/Jan, exactly as before), and neither one moves the other. See
+the comments on `windowStart` in `year-view.tsx` and on `YearHeader` itself.
 
 Today and All Tasks share every task component — the same inline rename, the
 same `TaskMenu`, the same metadata — so the two surfaces cannot drift apart.
@@ -97,9 +176,12 @@ src/
     task/                 shared by both views: EditableText, TaskMenu, meta
     today/                TodayView + its cards, composers, notes, wrap-up
     tasks/                AllTasksView, TaskRow, FilterBar
-    projects/             ProjectsView, ProjectView, colour, notes
+    projects/             ProjectsView, ProjectView, colour, notes,
+                          ProjectGoals, LegacyProjectFocus
     schedule/             ScheduleView, Timeline, RailBlock, sidebar, hours
-    settings/             BackupPanel
+    year/                 YearView, AnnualMatrix, MonthFocus, FocusEditor,
+                          YearHeader
+    settings/             BackupPanel, ImportPanel
     ui/                   Checkbox, Popover, Section — dumb primitives
   lib/
     types.ts              domain types — the contract with the DB
@@ -144,6 +226,111 @@ Restore validates first and then applies in **one** `set()`, so the store never
 observes a half-restored day. Older backups are upgraded through the same
 `migratePersisted` chain the store uses; newer ones are refused rather than
 guessed at.
+
+### Project goals: two annual-view modes, decided live
+
+Whether a project appears in `AnnualMatrix` at all is never a stored flag — it
+is computed on every render from whether `project_goals` has any rows for that
+project (`goalsForProject(...).length`). `rowsFor()` builds the whole table's
+rows as one flat list up front: a project with goals expands to a header row
+plus one row per goal, and **a project with no goals contributes nothing at
+all.** Building the list up front is also what lets "is this the table's true
+last row" be answered by array index instead of by walking a nested
+project → maybe-goals structure.
+
+The empty project used to get a plain row of its own. It was dropped because
+of what it cost per project: a name, twelve empty cells and a row of
+hairlines, all saying "nothing is planned here" on the screen whose whole job
+is showing what *is*. Skipping happens before the header is pushed, so an
+empty group band or a stray separator is not something to clean up afterwards
+— it is unrepresentable. When *no* project has a goal the matrix renders its
+own empty state (`copy.year.noGoalProjects`) rather than a bare header over
+nothing; it is deliberately not the `noProjects` message, since "create a
+project" is the wrong next step for someone who has five.
+
+This is presentation only. `MonthFocus` still renders a `FocusCard` with a
+full editor for every goal-less project, so a project's own monthly focus
+items stay visible and editable on the surface that owns them — the filter
+removes a row from one view, never a way to reach the data. `AnnualMatrix`
+consequently no longer takes the project-level `focus` array at all: the
+goal-less row was its only reader.
+
+Existing `monthly_focus` rows are never migrated when a project's first goal
+is created. They stop appearing in the annual view (which now only asks each
+project's goals for content) and become visible again only in
+`LegacyProjectFocus`, on the project's own screen — where the only actions are
+an explicit move to a chosen goal (`moveMonthlyFocusToGoal`, which refuses
+outright rather than merging if the destination already has content) or an
+explicit delete. Nothing does this automatically.
+
+### A goal's KPI: a fixed definition, and one value per month
+
+A KPI is two things that live in two different places, and conflating them
+was the first version's mistake (see decision 10 in `docs/SCHEMA.md`):
+
+- **The definition** — label, numeric target, optional unit, optional
+  free-text `targetLabel` — is a fact about the goal, fixed until someone
+  edits it. `target` is the only number anything measures against or ever
+  calculates from; `targetLabel` is a separate sentence for display, typed
+  once and never parsed back into a number (see decision 11 in
+  `docs/SCHEMA.md`) — "12,000 איש ברשימת תפוצה" says more than "12000" ever
+  could, and there is no reliable way to derive one from the other.
+  `kpiTargetText(kpi)` resolves which to show: `targetLabel` if present,
+  otherwise a plain fallback built from `target` + `unit`. In
+  `AnnualMatrix`'s frozen column, that resolved text shows as a second,
+  smaller line under the goal's own name (e.g. "יעד: 12,000 איש ברשימת
+  תפוצה") — never the metric name, only the target. The gold is carried by
+  the label alone: `copy.year.kpiGoalLabel` ("יעד:") renders in
+  `text-gold-deep` `font-medium`, and the target itself in plain
+  `text-text-2`. `gold-deep` rather than the chip's full-strength
+  `text-gold` even for two words, since the base `--color-gold` fails text
+  contrast on white outright (~2.6:1) — fine for a hover border, not for
+  type. The split is the point though: gold names the category and the
+  target stays easy to read, which is also what allows 11.5px here without
+  competing with the 13px goal name. It wraps rather than truncating: a target
+  sentence is meant to be read in full, not hinted at behind an ellipsis,
+  and `table-fixed` on the matrix already guarantees the column can't be
+  forced wider by it — only taller. The Project screen, where the goal
+  itself is edited, shows the same resolved text as plain (non-gold) text
+  instead — gold there would have nothing to relate to, since no monthly
+  chip appears on that screen.
+- **Each month's value** is a fact about that month, recorded separately
+  (`GoalMonthlyKpi`). It appears in exactly two places: as a small, centred,
+  shrink-wrapped chip at the top of that goal's cell for that month in
+  `AnnualMatrix` (`self-center` so the parent's `items-stretch` can't widen
+  it to match the white focus-item cards below it — the whole point is that
+  it reads as a compact chip, not another card the same shape as a focus
+  step — above any focus-item blocks in the same cell: the hierarchy is
+  Project → Goal → the target under its name → that month's KPI value →
+  that month's focus steps). On a goal that has a KPI *definition* the slot
+  is reserved in all twelve cells whether or not that month was measured —
+  an unmeasured month renders the identical chip with `invisible`, so the
+  reserved height is the real chip's height by construction rather than a
+  `min-h` guess that drifts the next time its padding changes, and
+  `visibility: hidden` keeps the placeholder out of the accessibility tree
+  as well as off the screen. Without the reservation a single measured month
+  pushed its own focus cards down while its neighbours' stayed put, and a
+  row read as ragged rather than as a series. A row whose goal has no KPI
+  definition reserves nothing: there is no chip anywhere in it to align to.
+  The value also appears as one lightweight editable field above the
+  focus editor in `MonthFocus`, for whichever month is open. The matrix chip
+  and the goal-column definition line render through the same
+  `GoalKpiValueBadge` component and `--color-gold` family respectively, so
+  the "subtle gold, calm not shouty" treatment can only ever drift in one
+  place.
+
+Deliberately no percentage and no progress bar anywhere in the matrix — the
+month-by-month raw numbers, read left to right, are the entire point of
+showing a KPI in an *annual* view; a percentage or bar per cell would compete
+with that for attention rather than support it. The target appears exactly
+once, in the goal-column definition line — never repeated inside a month
+cell. Reusing the app's existing `--color-gold` family (the Big task card's
+own accent) for both the value chip and the definition line was a
+deliberate, non-obvious call, and the family needed one new member
+(`--color-gold-deep`) once a piece of it had to hold text rather than serve
+as an accent — and then needed to be confined to the two-character label
+rather than the whole sentence, because a warm yellow-brown stays a category
+marker even at AA contrast. See the trap about both in `PROJECT_STATE.md`.
 
 ---
 
@@ -273,6 +460,9 @@ thing that moves work between days in bulk, and the user drives every choice.
 | Recurring weekly work hours | **remaining** |
 | Supabase: schema, RLS, auth | **done, verified end to end** |
 | Supabase persistence + real-data migration | **done, verified end to end** |
+| Annual view (`/year`, `monthly_focus`) | **done, applied** |
+| Project goals (`project_goals`, `goal_monthly_focus`) | **done, applied** |
+| Goal KPI (definition on the goal, monthly values in `goal_monthly_kpi`) | code done; `0014`–`0018` not yet applied |
 
 Schedule was built after All Tasks deliberately: without a backlog, any task not
 assigned to today effectively disappeared, which made planning impossible and
