@@ -42,6 +42,7 @@ function MediumTaskImpl({
 }) {
   const toggleTask = useDayStore((s) => s.toggleTask);
   const renameTask = useDayStore((s) => s.renameTask);
+  const setTaskDetail = useDayStore((s) => s.setTaskDetail);
   const toggleImportant = useDayStore((s) => s.toggleImportant);
 
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -100,6 +101,30 @@ function MediumTaskImpl({
                 done ? "text-text-2 line-through decoration-text-3/60 decoration-1" : "text-text",
               )}
             />
+
+            {/* Notes — the same field and behaviour as BigTask's, one step
+                quieter. Two lines at rest rather than Big's three: this card
+                is half the width, so two lines here already hold about as
+                much. Empty, it stays invisible until hover, focus or touch,
+                exactly like Big's — so it reserves its line either way, and
+                the card doesn't jump the moment the pointer arrives. */}
+            <div
+              className={cn(
+                "mt-0.5 transition-opacity duration-200",
+                !task.detail &&
+                  "opacity-0 focus-within:opacity-100 group-hover:opacity-100 no-hover:opacity-100",
+              )}
+            >
+              <EditableText
+                value={task.detail ?? ""}
+                onCommit={(next) => setTaskDetail(task.id, next)}
+                ariaLabel={copy.a11y.taskNotes}
+                placeholder={copy.compose.notes}
+                multiline
+                clampLines={2}
+                className="text-[13.5px] leading-relaxed text-text-2"
+              />
+            </div>
 
             {hasMeta && (
               <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">

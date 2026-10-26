@@ -163,6 +163,21 @@ Today and All Tasks share every task component — the same inline rename, the
 same `TaskMenu`, the same metadata — so the two surfaces cannot drift apart.
 They live in `components/task/`; the two views only decide layout.
 
+**Task notes live in the existing `detail` column — no new field.** It was
+already persisted end to end (DB, mappers, backup/restore, All Tasks search)
+but only surfaced as a one-line subtitle on Big. Adding a separate `notes`
+column would have put two near-identical free-text fields on one card, so
+`detail` was widened instead: multi-line (Shift+Enter breaks a line, Enter
+still commits, as everywhere else), on Big *and* Medium, clamped at rest to 3
+and 2 lines respectively, with the full text shown on click. All Tasks and
+the project page (both `TaskRow`) don't print notes at all — a long list
+would stop being a list — and instead give Big/Medium rows a note button that
+opens them under that one task; the button stays visible when a note exists.
+Small has no notes field anywhere, but a resized task keeps its notes.
+`EditableText`'s `multiline` mode is also what lets a note be *cleared*: a
+single-line field ignores an empty commit (a title can't be empty), which
+had quietly made the old subtitle impossible to delete.
+
 `TaskMenu`'s project picker offers `activeProjects(...)` only — an archived
 project is somewhere a task's history can point, not somewhere a new
 assignment should go. The one exception is the task's *own current* project,

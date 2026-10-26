@@ -1,6 +1,7 @@
 "use client";
 
-import { memo } from "react";
+import { memo, useState } from "react";
+import { StickyNote } from "lucide-react";
 
 import { EditableText } from "@/components/task/editable-text";
 import { ImportantHeart } from "@/components/task/important-heart";
@@ -29,6 +30,14 @@ const TITLE: Record<TaskSize, string> = {
 /**
  * One line in All Tasks. Not a table row: no columns, no grid, and the same
  * inline-rename and menu as the Today page so nothing has to be learned twice.
+ *
+ * Notes are the one thing this row does *not* show the way Today does. A list
+ * of a couple of hundred tasks with their notes printed under each would stop
+ * being a list, so a Big or Medium row carries a small note button instead,
+ * and the notes open under that one task when it is clicked. The button stays
+ * visible on a task that has notes — a quiet "there's something here" —
+ * and otherwise appears on hover like the menu beside it. Small tasks get no
+ * button, matching Today, where Small has no notes field either.
  */
 function TaskRowImpl({
   task,
@@ -44,7 +53,13 @@ function TaskRowImpl({
 }) {
   const toggleTask = useDayStore((s) => s.toggleTask);
   const renameTask = useDayStore((s) => s.renameTask);
+  const setTaskDetail = useDayStore((s) => s.setTaskDetail);
   const toggleImportant = useDayStore((s) => s.toggleImportant);
+
+  /** Local and per row: opening one task's notes says nothing about another's. */
+  const [notesOpen, setNotesOpen] = useState(false);
+  const hasNotesField = task.size !== "small";
+  const hasNotes = Boolean(task.detail);
 
   const hasMeta =
     project || task.scheduledStartMin !== null || task.dueDate || (showDate && task.plannedDate);
@@ -82,7 +97,44 @@ function TaskRowImpl({
             <ProjectTag project={project} />
           </div>
         )}
+
+        {hasNotesField && notesOpen && (
+          <div className="mt-2 border-s-2 border-line ps-3">
+            {/* `autoEdit` only when there's nothing to read yet: opening an
+                empty note is a request to write one, so it starts with the
+                cursor in it. A note that exists opens to be read first. */}
+            <EditableText
+              value={task.detail ?? ""}
+              onCommit={(next) => setTaskDetail(task.id, next)}
+              ariaLabel={copy.a11y.taskNotes}
+              placeholder={copy.compose.notes}
+              multiline
+              autoEdit={!hasNotes}
+              className="text-[13.5px] leading-relaxed text-text-2"
+            />
+          </div>
+        )}
       </div>
+
+      {hasNotesField && (
+        <button
+          type="button"
+          aria-expanded={notesOpen}
+          aria-label={notesOpen ? copy.a11y.hideNotes(task.title) : copy.a11y.showNotes(task.title)}
+          onClick={() => setNotesOpen((v) => !v)}
+          className={cn(
+            "flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-lg -mt-0.5 transition-all duration-200",
+            "hover:bg-canvas hover:text-text-2",
+            notesOpen
+              ? "text-blue opacity-100"
+              : hasNotes
+                ? "text-text-3 opacity-100"
+                : "text-text-3 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 no-hover:opacity-100",
+          )}
+        >
+          <StickyNote size={15} strokeWidth={1.7} />
+        </button>
+      )}
 
       <ImportantHeart
         important={task.isImportant}

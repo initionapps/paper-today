@@ -155,7 +155,13 @@ export const MAX_GOALS = 5;
 export interface Task {
   id: string;
   title: string;
-  /** One quiet line under the title. Not a rich-text body. */
+  /**
+   * The task's notes: plain multi-line text, never rich text. Shown and edited
+   * on Big and Medium only (clamped on the Today cards, opened on demand in
+   * All Tasks). The column is still called `detail` because it was once a
+   * single line under the title; widening what it holds needed no migration,
+   * and a Small task that has notes keeps them through a resize.
+   */
   detail?: string | null;
   projectId: string | null;
 

@@ -98,7 +98,8 @@ export const copy = {
     small: "הוסף משימה קטנה…",
     routine: "הוסף שגרה…",
     hint: "Enter להוספה · Esc לסגירה",
-    detail: "הוסף שורה…",
+    /** A Big or Medium task's notes (`Task.detail`). */
+    notes: "הוסף הערה…",
   },
 
   routines: {
@@ -527,7 +528,10 @@ export const copy = {
     taskActions: (title: string) => `פעולות עבור ${title}`,
     reorder: (title: string) => `שנה סדר של ${title}`,
     taskTitle: "כותרת משימה",
-    taskDetail: "פרטי משימה",
+    taskNotes: "הערות למשימה",
+    /** The notes toggle on an All Tasks / project row. */
+    showNotes: (title: string) => `הצג הערות עבור ${title}`,
+    hideNotes: (title: string) => `הסתר הערות עבור ${title}`,
     plannedDateInput: "בחירת תאריך מתוכנן",
     dueDateInput: "בחירת דדליין",
     newTaskDate: "תאריך למשימה החדשה",

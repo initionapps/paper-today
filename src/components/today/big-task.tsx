@@ -128,11 +128,16 @@ function BigTaskImpl({ task, project, today }: { task: Task; project?: Project; 
                   "opacity-0 focus-within:opacity-100 group-hover:opacity-100 no-hover:opacity-100",
               )}
             >
+              {/* The task's notes. Multi-line (Shift+Enter), clamped to three
+                  lines at rest so one long note can't make the card tower over
+                  the page; clicking it opens the whole thing for editing. */}
               <EditableText
                 value={task.detail ?? ""}
                 onCommit={(next) => setTaskDetail(task.id, next)}
-                ariaLabel={copy.a11y.taskDetail}
-                placeholder={copy.compose.detail}
+                ariaLabel={copy.a11y.taskNotes}
+                placeholder={copy.compose.notes}
+                multiline
+                clampLines={3}
                 className="text-[14px] leading-relaxed text-text-2"
               />
             </div>
